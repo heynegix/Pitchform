@@ -2,63 +2,105 @@
 
 **Edit vocals like notes. Free and open source.**
 
-Pitchform is a local-first visual vocal editor for intuitive, note-based pitch correction. Drop in a mono vocal, see its pitch as notes, drag a note up or down, preview the result, and export a WAV.
+[![CI](https://github.com/heynegix/Pitchform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/heynegix/Pitchform/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Pitchform is a free and open-source visual vocal editor for intuitive, note-based pitch correction.
 
 ```text
-Drop audio → Edit notes → Export
+Drop audio → See notes → Move a note → Hear the result → Export WAV
 ```
+
+## What it does
+
+Pitchform analyzes a single-voice recording, turns detected pitches into editable note blobs, and lets you correct them directly on a piano-roll view.
+
+- Import WAV, MP3, or FLAC audio
+- See the waveform, pitch curve, piano-roll grid, note blobs, and playhead together
+- Detect monophonic fundamental frequency (F0), voiced frames, and confidence values locally
+- Drag notes vertically to change pitch
+- Snap to semitones or make fine adjustments
+- Preview original and corrected audio with A/B switching
+- Select and loop a time range with Alt-drag
+- Render sustained-note corrections with a duration-preserving phase-vocoder preview
+- Keep the original source audio unchanged
+- Export corrected audio as WAV
+- Save and reopen self-contained `.pitchform` projects
 
 ## Current status
 
-Pitchform is an early `0.1.0` MVP foundation. The current app already includes:
+Pitchform is an early `0.1.0` development build. The core local MVP workflow is implemented, but it is not a stable production release yet.
 
-- WAV/MP3/FLAC import through the desktop webview's native decoder
-- waveform and piano-roll visualization
-- canvas click-to-seek and Alt-drag loop selection
-- local monophonic F0 detection with confidence values
-- rule-based note segmentation
-- vertical note dragging with semitone snapping and fine adjustment
-- undo/redo, original/corrected A/B preview, and WAV export
-- duration-preserving phase-vocoder preview for sustained note corrections
-- self-contained `.pitchform` JSON project files
-- no account, cloud upload, telemetry, or required API key
+The current detector and editor are designed for **single-voice, monophonic material** such as an isolated vocal or instrument. Double-tracked, polyphonic, noisy, or heavily reverberated recordings can produce incorrect pitch or note boundaries.
 
-Pitch detection and the lightweight correction renderer are intentionally designed for **single-voice, monophonic material**. Polyphonic editing, realtime autotune, plugins, and cloud features are out of scope for v0.1.
+The v0.1 renderer prioritizes deterministic local processing and duration stability. Formant preservation, advanced vibrato/drift editing, polyphonic editing, realtime correction, and plugin formats are not included.
+
+## Privacy first
+
+- Audio is processed locally in the app.
+- No account or cloud service is required.
+- No audio upload is performed.
+- No telemetry or analytics are included.
+- The source recording is never overwritten by note edits or export.
 
 ## Run locally
+
+Install dependencies and start the browser development UI:
 
 ```bash
 npm install
 npm run dev
 ```
 
-The web UI can be exercised in a browser. For the desktop shell:
+To run the Tauri desktop shell:
 
 ```bash
 npm run tauri dev
 ```
 
-Quality checks:
+Run the project checks before submitting changes:
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
 npm run build
+npm audit --omit=dev --audit-level=high
 ```
 
-## Privacy
+## Architecture
 
-Audio is processed in the local app. Pitchform does not upload audio, require an account, or include analytics. See [SECURITY.md](SECURITY.md).
+The UI is built with React, TypeScript, and Vite inside a Tauri 2 desktop shell. Audio analysis, note segmentation, correction rendering, and project serialization are kept in framework-independent TypeScript modules and can run in Web Workers.
+
+The current pipeline is:
+
+```text
+Audio file
+  ↓
+Local decode and mono downmix
+  ↓
+YIN-style F0 analysis
+  ↓
+Rule-based note segmentation
+  ↓
+Non-destructive note edits
+  ↓
+Worker-based preview rendering
+  ↓
+WAV export or .pitchform project
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for boundaries and invariants.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Dependency and license audit](docs/DEPENDENCIES.md)
+- [Architecture decisions](docs/DECISIONS.md)
 - [Roadmap](docs/ROADMAP.md)
-- [Decisions](docs/DECISIONS.md)
-- [Dependencies and licenses](docs/DEPENDENCIES.md)
 - [Contributing](CONTRIBUTING.md)
+- [Security and privacy](SECURITY.md)
 
 ## License
 
-Pitchform is released under the MIT License. See [LICENSE](LICENSE).
+Pitchform is released under the [MIT License](LICENSE).
