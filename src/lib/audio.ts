@@ -51,6 +51,8 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
 const FFT_SIZE = 1_024;
 const FFT_HOP = 256;
 const MAX_PHASE_VOCODER_SEGMENT_SAMPLES = 2_000_000;
+const RENDER_CONTEXT_MIN_SAMPLES = FFT_SIZE;
+const RENDER_CONTEXT_MAX_SAMPLES = 4_096;
 
 function wrapPhase(phase: number): number {
   return phase - 2 * Math.PI * Math.round(phase / (2 * Math.PI));
@@ -219,7 +221,16 @@ export function renderCorrectedSamples(samples: Float32Array, sampleRate: number
     if (end <= start) continue;
     const ratio = Math.max(0.25, Math.min(4, 2 ** ((note.targetPitchMidi - note.originalPitchMidi) / 12)));
     if (!Number.isFinite(ratio) || Math.abs(ratio - 1) < 0.0001) continue;
-    const shifted = pitchShiftSegment(samples.subarray(start, end), ratio);
+    // Give the phase vocoder material on both sides of a note so its first
+    // analysis frames contain the real transient/phase context. Only the
+    // note itself is mixed back, so neighboring notes are not edited.
+    const contextSamples = Math.min(
+      RENDER_CONTEXT_MAX_SAMPLES,
+      Math.max(RENDER_CONTEXT_MIN_SAMPLES, Math.floor(sampleRate * 0.02)),
+    );
+    const contextStart = Math.max(0, start - contextSamples);
+    const contextEnd = Math.min(samples.length, end + contextSamples);
+    const shifted = pitchShiftSegment(samples.subarray(contextStart, contextEnd), ratio);
     const fadeSamples = Math.min(Math.floor(sampleRate * 0.012), Math.floor((end - start) / 4));
     for (let index = start; index < end; index += 1) {
       const local = index - start;
@@ -227,7 +238,8 @@ export function renderCorrectedSamples(samples: Float32Array, sampleRate: number
       const fadeOut = fadeSamples > 0 ? Math.min(1, (end - index) / fadeSamples) : 1;
       const blend = Math.min(fadeIn, fadeOut);
       const original = Number.isFinite(samples[index]) ? samples[index] : 0;
-      const corrected = Number.isFinite(shifted[local]) ? shifted[local] : original;
+      const correctedIndex = index - contextStart;
+      const corrected = Number.isFinite(shifted[correctedIndex]) ? shifted[correctedIndex] : original;
       rendered[index] = original * (1 - blend) + corrected * blend;
     }
   }
