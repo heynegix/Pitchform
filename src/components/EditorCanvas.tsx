@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Note, PitchFrame } from '../types';
+import type { Note, PitchFrame, TimeRange } from '../types';
 
 interface EditorCanvasProps {
   durationSeconds: number;
@@ -10,8 +10,11 @@ interface EditorCanvasProps {
   zoom: number;
   snapToSemitone: boolean;
   playheadSeconds: number;
+  loopSelection: TimeRange | null;
   onScrollLeftChange: (scrollLeft: number) => void;
   onSelectNote: (noteId: string | null) => void;
+  onSeekSeconds: (seconds: number) => void;
+  onLoopSelectionChange: (selection: TimeRange) => void;
   onChangeNotePitch: (noteId: string, pitch: number, fine: boolean) => void;
   onCommitNotePitch: (noteId: string) => void;
 }
@@ -47,14 +50,18 @@ export function EditorCanvas({
   zoom,
   snapToSemitone,
   playheadSeconds,
+  loopSelection,
   onScrollLeftChange,
   onSelectNote,
+  onSeekSeconds,
+  onLoopSelectionChange,
   onChangeNotePitch,
   onCommitNotePitch,
 }: EditorCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ noteId: string; pointerId: number } | null>(null);
+  const loopDragRef = useRef<{ pointerId: number; startSeconds: number } | null>(null);
   const [viewportWidth, setViewportWidth] = useState(900);
   const timelineWidth = Math.max(760, viewportWidth * Math.max(1, zoom));
 
@@ -136,6 +143,22 @@ export function EditorCanvas({
       context.strokeRect(0, y + 1, PIANO_WIDTH - (isBlackKey(midi) ? 12 : 0), Math.max(1, nextY - y - 2));
     }
 
+    // Loop selection overlay.
+    if (loopSelection && loopSelection.endSeconds > loopSelection.startSeconds) {
+      const loopStartX = Math.max(PIANO_WIDTH, timeToX(Math.max(0, Math.min(durationSeconds, loopSelection.startSeconds))));
+      const loopEndX = Math.min(width, timeToX(Math.max(0, Math.min(durationSeconds, loopSelection.endSeconds))));
+      context.fillStyle = 'rgba(251, 191, 36, 0.09)';
+      context.fillRect(loopStartX, 0, Math.max(0, loopEndX - loopStartX), chartBottom);
+      context.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(loopStartX, 0);
+      context.lineTo(loopStartX, chartBottom);
+      context.moveTo(loopEndX, 0);
+      context.lineTo(loopEndX, chartBottom);
+      context.stroke();
+    }
+
     // Original pitch curve.
     context.strokeStyle = '#67e8f9';
     context.lineWidth = 1.5;
@@ -211,7 +234,15 @@ export function EditorCanvas({
     context.moveTo(playheadX, 0);
     context.lineTo(playheadX, height);
     context.stroke();
-  }, [durationSeconds, frames, notes, playheadSeconds, selectedNoteId, timelineWidth, waveform, zoom]);
+  }, [durationSeconds, frames, loopSelection, notes, playheadSeconds, selectedNoteId, timelineWidth, waveform, zoom]);
+
+  const timeAtClientX = (clientX: number): number => {
+    const canvas = canvasRef.current;
+    if (!canvas || durationSeconds <= 0) return 0;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return Math.max(0, Math.min(durationSeconds, ((clientX - rect.left) / rect.width) * durationSeconds));
+  };
 
   const pitchAtClientY = (clientY: number): number => {
     const canvas = canvasRef.current;
@@ -226,8 +257,7 @@ export function EditorCanvas({
   const noteAtClientPoint = (clientX: number, clientY: number): Note | undefined => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
-    const rect = canvas.getBoundingClientRect();
-    const seconds = ((clientX - rect.left) / rect.width) * durationSeconds;
+    const seconds = timeAtClientX(clientX);
     const pitch = pitchAtClientY(clientY);
     for (let index = notes.length - 1; index >= 0; index -= 1) {
       const note = notes[index];
@@ -238,9 +268,22 @@ export function EditorCanvas({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
+    if (event.altKey) {
+      event.preventDefault();
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        return;
+      }
+      const startSeconds = timeAtClientX(event.clientX);
+      loopDragRef.current = { pointerId: event.pointerId, startSeconds };
+      onLoopSelectionChange({ startSeconds, endSeconds: startSeconds });
+      return;
+    }
     const note = noteAtClientPoint(event.clientX, event.clientY);
     if (!note) {
       onSelectNote(null);
+      onSeekSeconds(timeAtClientX(event.clientX));
       return;
     }
     try {
@@ -254,12 +297,32 @@ export function EditorCanvas({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const loopDrag = loopDragRef.current;
+    if (loopDrag && loopDrag.pointerId === event.pointerId) {
+      const currentSeconds = timeAtClientX(event.clientX);
+      onLoopSelectionChange({
+        startSeconds: Math.min(loopDrag.startSeconds, currentSeconds),
+        endSeconds: Math.max(loopDrag.startSeconds, currentSeconds),
+      });
+      return;
+    }
     if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return;
     const pitch = pitchAtClientY(event.clientY);
     onChangeNotePitch(dragRef.current.noteId, pitch, event.shiftKey || !snapToSemitone);
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const loopDrag = loopDragRef.current;
+    if (loopDrag && loopDrag.pointerId === event.pointerId) {
+      loopDragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      const currentSeconds = timeAtClientX(event.clientX);
+      onLoopSelectionChange({
+        startSeconds: Math.min(loopDrag.startSeconds, currentSeconds),
+        endSeconds: Math.max(loopDrag.startSeconds, currentSeconds),
+      });
+      return;
+    }
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
