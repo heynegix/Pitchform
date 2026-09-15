@@ -20,6 +20,14 @@ const CANVAS_HEIGHT = 520;
 const TOP_PADDING = 28;
 const WAVEFORM_HEIGHT = 74;
 const PIANO_WIDTH = 52;
+const MAX_DRAWN_FRAMES = 12_000;
+
+function pitchBounds(notes: Note[]): { topMidi: number; bottomMidi: number } {
+  return {
+    topMidi: notes.reduce((highest, note) => Math.max(highest, note.targetPitchMidi + 4), 84),
+    bottomMidi: notes.reduce((lowest, note) => Math.min(lowest, note.targetPitchMidi - 4), 36),
+  };
+}
 
 function midiLabel(midi: number): string {
   const names = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
@@ -53,16 +61,22 @@ export function EditorCanvas({
   useEffect(() => {
     const element = scrollerRef.current;
     if (!element) return;
-    const observer = new ResizeObserver(() => setViewportWidth(Math.max(320, element.clientWidth)));
+    const updateWidth = () => setViewportWidth(Math.max(320, element.clientWidth));
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      updateWidth();
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+    const observer = new ResizeObserver(updateWidth);
     observer.observe(element);
-    setViewportWidth(Math.max(320, element.clientWidth));
+    updateWidth();
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || durationSeconds <= 0) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
     canvas.width = Math.floor(timelineWidth * dpr);
     canvas.height = CANVAS_HEIGHT * dpr;
     canvas.style.width = `${timelineWidth}px`;
@@ -73,8 +87,7 @@ export function EditorCanvas({
     const width = timelineWidth;
     const height = CANVAS_HEIGHT;
     const chartBottom = height - WAVEFORM_HEIGHT;
-    const topMidi = Math.max(84, ...notes.map((note) => note.targetPitchMidi + 4));
-    const bottomMidi = Math.min(36, ...notes.map((note) => note.targetPitchMidi - 4));
+    const { topMidi, bottomMidi } = pitchBounds(notes);
     const pitchRange = Math.max(12, topMidi - bottomMidi);
     const timeToX = (seconds: number) => (seconds / durationSeconds) * width;
     const pitchToY = (midi: number) => TOP_PADDING + ((topMidi - midi) / pitchRange) * (chartBottom - TOP_PADDING - 12);
@@ -129,7 +142,9 @@ export function EditorCanvas({
     context.globalAlpha = 0.8;
     context.beginPath();
     let curveStarted = false;
-    for (const frame of frames) {
+    const frameStep = Math.max(1, Math.ceil(frames.length / MAX_DRAWN_FRAMES));
+    for (let frameIndex = 0; frameIndex < frames.length; frameIndex += frameStep) {
+      const frame = frames[frameIndex];
       if (!frame.voiced || frame.midi === null) {
         curveStarted = false;
         continue;
@@ -189,7 +204,7 @@ export function EditorCanvas({
     context.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
     context.fillText('WAVEFORM', 10, chartBottom + 16);
 
-    const playheadX = timeToX(playheadSeconds);
+    const playheadX = timeToX(Math.max(0, Math.min(durationSeconds, playheadSeconds)));
     context.strokeStyle = '#f8fafc';
     context.lineWidth = 1.5;
     context.beginPath();
@@ -203,8 +218,7 @@ export function EditorCanvas({
     if (!canvas) return 60;
     const rect = canvas.getBoundingClientRect();
     const chartBottom = CANVAS_HEIGHT - WAVEFORM_HEIGHT;
-    const topMidi = Math.max(84, ...notes.map((note) => note.targetPitchMidi + 4));
-    const bottomMidi = Math.min(36, ...notes.map((note) => note.targetPitchMidi - 4));
+    const { topMidi, bottomMidi } = pitchBounds(notes);
     const pitchRange = Math.max(12, topMidi - bottomMidi);
     return topMidi - ((clientY - rect.top - TOP_PADDING) / (chartBottom - TOP_PADDING - 12)) * pitchRange;
   };
@@ -215,16 +229,26 @@ export function EditorCanvas({
     const rect = canvas.getBoundingClientRect();
     const seconds = ((clientX - rect.left) / rect.width) * durationSeconds;
     const pitch = pitchAtClientY(clientY);
-    return [...notes].reverse().find((note) => seconds >= note.startSeconds && seconds <= note.endSeconds && Math.abs(note.targetPitchMidi - pitch) < 1.1);
+    for (let index = notes.length - 1; index >= 0; index -= 1) {
+      const note = notes[index];
+      if (seconds >= note.startSeconds && seconds <= note.endSeconds && Math.abs(note.targetPitchMidi - pitch) < 1.1) return note;
+    }
+    return undefined;
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
     const note = noteAtClientPoint(event.clientX, event.clientY);
     if (!note) {
       onSelectNote(null);
       return;
     }
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some embedded webviews can lose the canvas between pointerdown and capture.
+      return;
+    }
     dragRef.current = { noteId: note.id, pointerId: event.pointerId };
     onSelectNote(note.id);
   };
@@ -239,7 +263,7 @@ export function EditorCanvas({
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     onCommitNotePitch(drag.noteId);
   };
 
@@ -257,4 +281,3 @@ export function EditorCanvas({
     </div>
   );
 }
-

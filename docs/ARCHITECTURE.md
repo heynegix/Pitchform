@@ -23,11 +23,11 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 ## Current processing path
 
 1. The browser/webview decodes WAV, MP3, or FLAC into an `AudioBuffer`.
-2. The first channel is downmixed and analyzed in a worker-friendly pure function. The current UI runs it asynchronously through a worker when supported and falls back to the main thread for constrained environments.
+2. The first channel is downmixed and analyzed in a worker-friendly pure function. The UI runs analysis asynchronously through a dedicated worker when supported and cancels stale work when a newer file is opened.
 3. YIN-style difference analysis produces voiced F0 frames, confidence, and MIDI pitch.
 4. Rule-based segmentation groups stable voiced frames into editable `Note` objects.
 5. The editor changes only `targetPitchMidi`; original analysis remains immutable.
-6. Preview/export uses a deterministic per-note resampling renderer. It preserves the project timeline and is deliberately replaceable by a higher-quality phase-vocoder or neural backend later.
+6. Preview/export uses a deterministic per-note resampling renderer in a dedicated worker. It preserves the project timeline and is deliberately replaceable by a higher-quality phase-vocoder or neural backend later.
 
 ## Invariants
 
@@ -36,4 +36,6 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 - note times are seconds and always satisfy `0 <= start < end <= duration`;
 - serialization is versioned;
 - all audio samples written to WAV are finite and clipped to `[-1, 1]`.
-
+- project files are size- and shape-validated before their embedded audio is decoded;
+- embedded project audio is capped at 256 MB of project JSON and must match the stored duration; the decoded sample rate may vary because browsers can resample through `AudioContext`;
+- only the newest load/render operation may update application state.

@@ -16,3 +16,10 @@ Rubber Band and other mature pitch/time libraries remain candidates, but their l
 
 The first project format embeds a PCM WAV asset alongside source metadata, analysis, edits, and editor state. This makes Save → Open work offline and avoids a fragile absolute path. The format is versioned so future projects can move to external assets without silently breaking old files.
 
+## 2026-09-15 — Cancel stale asynchronous work
+
+Opening or dropping a second file must never allow the first file's analysis or render to overwrite the current document. Loads and worker jobs therefore carry an operation identity and abort stale analysis/render tasks. Rendering is debounced briefly during drag edits so pointer movement does not create an unbounded worker queue.
+
+## 2026-09-15 — Bound project input before parsing
+
+`.pitchform` is JSON with embedded base64 audio, so an untrusted file can otherwise cause excessive allocation before validation. The app rejects project files above 256 MB, validates the envelope and note/frame limits, and verifies that decoded audio matches the stored analysis duration before changing editor state. The sample rate is allowed to differ because browser `AudioContext` implementations may resample decoded audio; the current buffer's actual rate is used for rendering and future saves.
