@@ -17,10 +17,12 @@ const DEFAULTS: Required<AnalysisOptions> = {
 };
 
 export function frequencyToMidi(frequencyHz: number): number {
+  if (!Number.isFinite(frequencyHz) || frequencyHz <= 0) return Number.NaN;
   return 69 + 12 * Math.log2(frequencyHz / 440);
 }
 
 export function midiToFrequency(midi: number): number {
+  if (!Number.isFinite(midi)) return Number.NaN;
   return 440 * 2 ** ((midi - 69) / 12);
 }
 
@@ -39,6 +41,25 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function resolveOptions(options: AnalysisOptions): Required<AnalysisOptions> {
+  const positiveInteger = (value: number | undefined, fallback: number, minimum: number, maximum: number) => {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(maximum, Math.max(minimum, Math.round(value as number)));
+  };
+  const frameSize = positiveInteger(options.frameSize, DEFAULTS.frameSize, 256, 8192);
+  const hopSize = positiveInteger(options.hopSize, DEFAULTS.hopSize, 32, frameSize);
+  const minFrequency = Number.isFinite(options.minFrequency)
+    ? Math.min(2_000, Math.max(20, options.minFrequency as number))
+    : DEFAULTS.minFrequency;
+  const maxFrequency = Number.isFinite(options.maxFrequency)
+    ? Math.min(4_000, Math.max(minFrequency + 1, options.maxFrequency as number))
+    : DEFAULTS.maxFrequency;
+  const rmsThreshold = Number.isFinite(options.rmsThreshold)
+    ? Math.min(1, Math.max(0, options.rmsThreshold as number))
+    : DEFAULTS.rmsThreshold;
+  return { frameSize, hopSize, minFrequency, maxFrequency, rmsThreshold };
 }
 
 function analyzeFrame(
@@ -118,13 +139,18 @@ export function analyzeMonophonic(
   sampleRate: number,
   options: AnalysisOptions = {},
 ): PitchFrame[] {
-  const resolved = { ...DEFAULTS, ...options };
-  if (samples.length === 0 || sampleRate <= 0) return [];
+  const resolved = resolveOptions(options);
+  if (samples.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0 || sampleRate > 384_000) return [];
+  const cleanSamples = new Float32Array(samples.length);
+  for (let index = 0; index < samples.length; index += 1) {
+    cleanSamples[index] = Number.isFinite(samples[index]) ? samples[index] : 0;
+  }
   const frames: PitchFrame[] = [];
-  for (let start = 0; start < samples.length; start += resolved.hopSize) {
-    const result = analyzeFrame(samples, start, sampleRate, resolved);
+  const durationSeconds = cleanSamples.length / sampleRate;
+  for (let start = 0; start < cleanSamples.length; start += resolved.hopSize) {
+    const result = analyzeFrame(cleanSamples, start, sampleRate, resolved);
     frames.push({
-      timeSeconds: (start + resolved.frameSize / 2) / sampleRate,
+      timeSeconds: Math.min(durationSeconds, (start + resolved.frameSize / 2) / sampleRate),
       frequencyHz: result.frequencyHz,
       midi: result.frequencyHz === null ? null : frequencyToMidi(result.frequencyHz),
       confidence: result.confidence,
@@ -167,9 +193,26 @@ export function segmentNotes(
   durationSeconds: number,
   options: SegmentationOptions = {},
 ): Note[] {
-  const resolved = { ...SEGMENTATION_DEFAULTS, ...options };
-  if (frames.length === 0 || durationSeconds <= 0) return [];
-  const frameStep = frames.length > 1 ? Math.max(0.001, frames[1].timeSeconds - frames[0].timeSeconds) : 0.01;
+  const positive = (value: number | undefined, fallback: number, minimum: number, maximum: number) => Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value as number))
+    : fallback;
+  const resolved = {
+    minNoteSeconds: positive(options.minNoteSeconds, SEGMENTATION_DEFAULTS.minNoteSeconds, 0.01, 10),
+    maxGapSeconds: positive(options.maxGapSeconds, SEGMENTATION_DEFAULTS.maxGapSeconds, 0.01, 5),
+    jumpSemitones: positive(options.jumpSemitones, SEGMENTATION_DEFAULTS.jumpSemitones, 0.1, 24),
+    minConfidence: positive(options.minConfidence, SEGMENTATION_DEFAULTS.minConfidence, 0, 1),
+  };
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
+  const orderedFrames = frames
+    .filter((frame) => Number.isFinite(frame.timeSeconds) && frame.timeSeconds >= 0 && frame.timeSeconds <= durationSeconds)
+    .sort((left, right) => left.timeSeconds - right.timeSeconds);
+  if (orderedFrames.length === 0) return [];
+  const frameDeltas: number[] = [];
+  for (let index = 1; index < Math.min(orderedFrames.length, 32); index += 1) {
+    const delta = orderedFrames[index].timeSeconds - orderedFrames[index - 1].timeSeconds;
+    if (delta > 0) frameDeltas.push(delta);
+  }
+  const frameStep = frameDeltas.length > 0 ? Math.max(0.001, median(frameDeltas)) : 0.01;
   const halfStep = frameStep / 2;
   const notes: Note[] = [];
   let current: PitchFrame[] = [];
@@ -179,11 +222,11 @@ export function segmentNotes(
     const first = current[0];
     const last = current[current.length - 1];
     const pitches = current.map((frame) => frame.midi as number);
-    const startSeconds = Math.max(0, first.timeSeconds - halfStep);
-    const endSeconds = Math.min(durationSeconds, last.timeSeconds + halfStep);
+    const startSeconds = Math.min(durationSeconds, Math.max(0, first.timeSeconds - halfStep));
+    const endSeconds = Math.min(durationSeconds, Math.max(startSeconds, last.timeSeconds + halfStep));
     if (endSeconds - startSeconds >= resolved.minNoteSeconds) {
       const originalPitchMidi = median(pitches);
-      const confidence = current.reduce((sum, frame) => sum + frame.confidence, 0) / current.length;
+      const confidence = clamp(current.reduce((sum, frame) => sum + frame.confidence, 0) / current.length, 0, 1);
       notes.push({
         id: `note-${notes.length + 1}`,
         startSeconds,
@@ -197,8 +240,12 @@ export function segmentNotes(
     current = [];
   };
 
-  for (const frame of frames) {
-    const usable = frame.voiced && frame.midi !== null && frame.confidence >= resolved.minConfidence;
+  for (const frame of orderedFrames) {
+    const usable = frame.voiced
+      && frame.midi !== null
+      && Number.isFinite(frame.midi)
+      && Number.isFinite(frame.confidence)
+      && frame.confidence >= resolved.minConfidence;
     if (!usable) {
       if (current.length > 0 && frame.timeSeconds - current[current.length - 1].timeSeconds > resolved.maxGapSeconds) flush();
       continue;

@@ -21,6 +21,20 @@ describe('pitch analysis', () => {
     const average = voiced.reduce((sum, frame) => sum + (frame.midi as number), 0) / voiced.length;
     expect(average).toBeCloseTo(69, 1);
   });
+
+  it('does not invent voiced frames from silence or non-finite samples', () => {
+    const samples = new Float32Array(5000);
+    samples.fill(Number.NaN);
+    const frames = analyzeMonophonic(samples, 44100);
+    expect(frames.some((frame) => frame.voiced)).toBe(false);
+  });
+
+  it('rejects invalid sample rates and keeps frame timestamps inside the clip', () => {
+    expect(analyzeMonophonic(sineWave(440, 44100, 0.1), Number.NaN)).toEqual([]);
+    const duration = 0.037;
+    const frames = analyzeMonophonic(sineWave(440, 44100, duration), 44100);
+    expect(Math.max(...frames.map((frame) => frame.timeSeconds))).toBeLessThanOrEqual(duration);
+  });
 });
 
 describe('note segmentation', () => {
@@ -36,4 +50,3 @@ describe('note segmentation', () => {
     expect(notes[1].originalPitchMidi).toBeCloseTo(72, 4);
   });
 });
-
