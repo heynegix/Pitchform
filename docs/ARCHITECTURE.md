@@ -23,7 +23,7 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 ## Current processing path
 
 1. The browser/webview decodes WAV, MP3, or FLAC into an `AudioBuffer`.
-2. The first channel is downmixed and analyzed in a worker-friendly pure function. The UI runs analysis asynchronously through a dedicated worker when supported and cancels stale work when a newer file is opened.
+2. The decoded buffer is checked for finite duration and bounded channel-sample memory before the first channel is downmixed. The mono signal is analyzed in a worker-friendly pure function. The UI runs analysis asynchronously through a dedicated worker when supported, receives throttled progress updates, and cancels stale work when a newer file is opened.
 3. YIN-style difference analysis produces voiced F0 frames, confidence, and MIDI pitch.
 4. Rule-based segmentation groups stable voiced frames into editable `Note` objects.
 5. The editor changes only `targetPitchMidi`; original analysis remains immutable.
@@ -41,7 +41,10 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 - embedded project audio is capped at 256 MB of project JSON and must match the stored duration; the decoded sample rate may vary because browsers can resample through `AudioContext`;
 - loop ranges are optional, finite, strictly positive, and bounded by the analyzed duration; older projects without loop fields remain valid;
 - imported audio files are capped at 256 MB before decoding, and a new document resets transport/editor viewport state rather than inheriting the previous document's position;
+- decoded audio is capped at 3,600 seconds and 192 million channel samples after decoding, protecting both direct imports and embedded project audio from compressed/decompressed size mismatches;
 - timeline coordinates exclude the fixed piano-key gutter, so drawing, seeking, waveform peaks, notes, and loop ranges share one time origin;
 - undo/redo stacks are mutated outside React state updater callbacks and a small render signal keeps toolbar availability synchronized without Strict Mode side effects;
 - CI runs frontend checks plus Rust/Tauri checks on Ubuntu, Windows, and macOS, with dependency auditing and bounded job duration;
 - only the newest load/render operation may update application state.
+- keyboard pitch edits, reset actions, and pointer edits share the same bounded MIDI quantization and undo history;
+- project dirty state includes pitch edits, zoom, snap preference, and loop selection, and a dirty document warns before unload or replacement.

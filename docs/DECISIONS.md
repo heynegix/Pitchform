@@ -28,6 +28,14 @@ Opening or dropping a second file must never allow the first file's analysis or 
 
 Audio decoding can allocate substantially more memory than the compressed file size. The browser path therefore rejects source audio larger than 256 MB before creating an `AudioContext`. This keeps an accidental or malicious large drop from causing an avoidable memory spike; longer or higher-quality source support can be revisited with measured streaming limits.
 
+## 2026-09-15 — Bound decoded audio and expose progress
+
+Compressed input size alone does not bound decoded memory, and embedded project audio follows a separate open path. Both paths now validate decoded duration and total channel samples immediately after `decodeAudioData`. Analysis also emits throttled progress through the worker so long local operations have visible feedback without flooding the UI event loop.
+
+## 2026-09-15 — Make the editor keyboard-complete
+
+The canvas is focusable and the application supports keyboard transport, note navigation, semitone/quarter-tone nudging, reset, undo/redo, and project save. These actions use the same pitch quantization and history model as pointer editing. Dirty-state protection covers persisted editor settings as well as note targets, preventing a loop or zoom change from being silently lost.
+
 ## 2026-09-15 — Keep the piano-key gutter outside the timeline
 
 The editor reserves a fixed left gutter for piano keys. Timeline coordinates begin after that gutter and use the same mapping for notes, pitch curves, waveforms, playhead, seeking, and loop selection. This prevents a visible click position from seeking to a different time than the content under the cursor.

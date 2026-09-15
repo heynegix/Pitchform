@@ -26,6 +26,7 @@ Pitchform analyzes a single-voice recording, turns detected pitches into editabl
 - Keep the original source audio unchanged
 - Export corrected audio as WAV
 - Save and reopen self-contained `.pitchform` projects
+- Use keyboard shortcuts for transport, navigation, pitch nudging, reset, undo/redo, and save
 
 ## Current status
 
@@ -34,6 +35,20 @@ Pitchform is an early `0.1.0` development build. The core local MVP workflow is 
 The current detector and editor are designed for **single-voice, monophonic material** such as an isolated vocal or instrument. Double-tracked, polyphonic, noisy, or heavily reverberated recordings can produce incorrect pitch or note boundaries.
 
 The v0.1 renderer prioritizes deterministic local processing and duration stability. Formant preservation, advanced vibrato/drift editing, polyphonic editing, realtime correction, and plugin formats are not included.
+
+Audio imports are limited to 256 MB compressed input, 60 minutes of decoded duration, and a bounded decoded sample budget. The effective duration limit can be lower for high sample-rate or multi-channel files.
+
+## Controls
+
+- Click a note to select it; drag vertically to change pitch.
+- Hold `Shift` while dragging for quarter-tone adjustments.
+- `Alt`-drag across the timeline to create a loop selection.
+- `Space` plays or pauses; `←`/`→` selects neighboring notes.
+- `↑`/`↓` nudges the selected note by a semitone; `Shift` nudges by a quarter tone.
+- `R` resets the selected note to its detected pitch.
+- `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+S` undo, redo, and save.
+
+Pitch edits and saved editor settings are marked as unsaved. Opening another audio file or project asks before discarding unsaved changes.
 
 ## Privacy first
 

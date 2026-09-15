@@ -1,5 +1,19 @@
 import type { Note } from '../types';
 
+export const MAX_DECODED_CHANNEL_SAMPLES = 192_000_000;
+export const MAX_AUDIO_DURATION_SECONDS = 3_600;
+
+export function validateDecodedAudioBuffer(buffer: Pick<AudioBuffer, 'length' | 'numberOfChannels' | 'duration'>): void {
+  const decodedChannelSamples = buffer.length * Math.max(1, buffer.numberOfChannels);
+  if (!Number.isSafeInteger(decodedChannelSamples)
+    || decodedChannelSamples > MAX_DECODED_CHANNEL_SAMPLES
+    || !Number.isFinite(buffer.duration)
+    || buffer.duration <= 0
+    || buffer.duration > MAX_AUDIO_DURATION_SECONDS) {
+    throw new Error('This audio is too long or expands to too much decoded data (maximum 60 minutes).');
+  }
+}
+
 export function audioBufferToMono(buffer: AudioBuffer): Float32Array {
   const mono = new Float32Array(buffer.length);
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {

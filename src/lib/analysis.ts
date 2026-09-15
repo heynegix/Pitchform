@@ -6,9 +6,12 @@ export interface AnalysisOptions {
   minFrequency?: number;
   maxFrequency?: number;
   rmsThreshold?: number;
+  onProgress?: (progress: number) => void;
 }
 
-const DEFAULTS: Required<AnalysisOptions> = {
+type ResolvedAnalysisOptions = Required<Omit<AnalysisOptions, 'onProgress'>>;
+
+const DEFAULTS: ResolvedAnalysisOptions = {
   frameSize: 2048,
   hopSize: 512,
   minFrequency: 70,
@@ -43,7 +46,7 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
-function resolveOptions(options: AnalysisOptions): Required<AnalysisOptions> {
+function resolveOptions(options: AnalysisOptions): ResolvedAnalysisOptions {
   const positiveInteger = (value: number | undefined, fallback: number, minimum: number, maximum: number) => {
     if (!Number.isFinite(value)) return fallback;
     return Math.min(maximum, Math.max(minimum, Math.round(value as number)));
@@ -66,7 +69,7 @@ function analyzeFrame(
   samples: Float32Array,
   start: number,
   sampleRate: number,
-  options: Required<AnalysisOptions>,
+  options: ResolvedAnalysisOptions,
 ): { frequencyHz: number | null; confidence: number; voiced: boolean } {
   const available = Math.min(options.frameSize, samples.length - start);
   if (available < Math.max(64, options.frameSize / 4)) {
@@ -147,6 +150,8 @@ export function analyzeMonophonic(
   }
   const frames: PitchFrame[] = [];
   const durationSeconds = cleanSamples.length / sampleRate;
+  const progress = options.onProgress;
+  let lastProgress = -1;
   for (let start = 0; start < cleanSamples.length; start += resolved.hopSize) {
     const result = analyzeFrame(cleanSamples, start, sampleRate, resolved);
     frames.push({
@@ -156,10 +161,15 @@ export function analyzeMonophonic(
       confidence: result.confidence,
       voiced: result.voiced,
     });
+    const currentProgress = Math.min(1, (start + resolved.hopSize) / cleanSamples.length);
+    if (progress && (currentProgress >= 1 || currentProgress - lastProgress >= 0.02)) {
+      lastProgress = currentProgress;
+      progress(currentProgress);
+    }
   }
 
   // Median smoothing removes isolated octave or autocorrelation errors without erasing note changes.
-  return frames.map((frame, index) => {
+  const smoothed = frames.map((frame, index) => {
     if (!frame.voiced || frame.midi === null) return frame;
     const neighbors = frames
       .slice(Math.max(0, index - 1), Math.min(frames.length, index + 2))
@@ -172,6 +182,8 @@ export function analyzeMonophonic(
       frequencyHz: midiToFrequency(smoothedMidi),
     };
   });
+  progress?.(1);
+  return smoothed;
 }
 
 export interface SegmentationOptions {
