@@ -35,20 +35,22 @@ describe('project format', () => {
   });
 
   it('rejects inconsistent edit copies and invalid base64 envelopes', () => {
+    const note = { id: 'note-1', startSeconds: 0, endSeconds: 0.02, originalPitchMidi: 69, targetPitchMidi: 69, centsOffset: 0, confidence: 1 };
     const project = createPitchformProject(
       { name: 'vocal.wav', size: 10, lastModified: 0, sha256: 'b'.repeat(64) },
       100,
       0.04,
       new Float32Array([0, 0.25, -0.25, 0]),
       [],
-      [],
+      [note],
       { zoom: 1, scrollLeft: 0, snapToSemitone: true },
     );
-    const inconsistent = {
+    const edited = {
       ...project,
-      edits: { notes: [{ id: 'note-1', startSeconds: 0, endSeconds: 0.02, originalPitchMidi: 69, targetPitchMidi: 69, centsOffset: 0, confidence: 1 }] },
+      edits: { notes: [{ ...note, targetPitchMidi: 70, centsOffset: 100 }] },
     };
-    expect(isPitchformProject(inconsistent)).toBe(false);
+    expect(isPitchformProject(edited)).toBe(true);
+    expect(isPitchformProject({ ...project, edits: { notes: [{ ...note, startSeconds: 0.01 }] } })).toBe(false);
     expect(isPitchformProject({ ...project, audioWavBase64: 'AAAAA' })).toBe(false);
   });
 });

@@ -65,12 +65,10 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
   const editorState = project.editorState;
   const notes = project.edits?.notes;
   const durationSeconds = analysis?.durationSeconds;
-  const sameNote = (left: Note, right: Note) => left.id === right.id
+  const sameNoteStructure = (left: Note, right: Note) => left.id === right.id
     && left.startSeconds === right.startSeconds
     && left.endSeconds === right.endSeconds
     && left.originalPitchMidi === right.originalPitchMidi
-    && left.targetPitchMidi === right.targetPitchMidi
-    && left.centsOffset === right.centsOffset
     && left.confidence === right.confidence;
   const validFrame = (frame: unknown) => {
     if (typeof frame !== 'object' || frame === null) return false;
@@ -126,7 +124,7 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
     && Array.isArray(project.notes) && project.notes.length <= MAX_NOTES && project.notes.every(validNote)
     && new Set(project.notes.map((note) => note.id)).size === project.notes.length
     && Array.isArray(notes) && notes.length === project.notes.length && notes.every(validNote)
-    && project.notes.every((note, index) => sameNote(note, notes[index]))
+    && project.notes.every((note, index) => sameNoteStructure(note, notes[index]))
     && new Set(notes.map((note) => note.id)).size === notes.length
     && typeof editorState?.zoom === 'number' && Number.isFinite(editorState.zoom) && editorState.zoom >= 1 && editorState.zoom <= 16
     && typeof editorState?.scrollLeft === 'number' && Number.isFinite(editorState.scrollLeft) && editorState.scrollLeft >= 0
@@ -134,5 +132,9 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
 }
 
 export function projectToJson(project: PitchformProject): string {
-  return JSON.stringify(project, null, 2);
+  const json = JSON.stringify(project, null, 2);
+  if (new TextEncoder().encode(json).byteLength > MAX_PROJECT_FILE_BYTES) {
+    throw new RangeError('Project is too large to save safely.');
+  }
+  return json;
 }

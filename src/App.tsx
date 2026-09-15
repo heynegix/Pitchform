@@ -18,6 +18,20 @@ function cloneNotes(notes: Note[]): Note[] {
   return notes.map((note) => ({ ...note }));
 }
 
+function notesEqual(left: Note[], right: Note[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((note, index) => {
+    const other = right[index];
+    return note.id === other.id
+      && note.startSeconds === other.startSeconds
+      && note.endSeconds === other.endSeconds
+      && note.originalPitchMidi === other.originalPitchMidi
+      && note.targetPitchMidi === other.targetPitchMidi
+      && note.centsOffset === other.centsOffset
+      && note.confidence === other.confidence;
+  });
+}
+
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -410,7 +424,7 @@ export default function App() {
     dragStartNotes.current = null;
     if (!before) return;
     setNotes((current) => {
-      if (JSON.stringify(before) === JSON.stringify(current)) return current;
+      if (notesEqual(before, current)) return current;
       history.current.push(before);
       future.current = [];
       return current;

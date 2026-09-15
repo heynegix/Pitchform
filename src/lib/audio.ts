@@ -9,6 +9,10 @@ export function audioBufferToMono(buffer: AudioBuffer): Float32Array {
       mono[index] += sample / Math.max(1, buffer.numberOfChannels);
     }
   }
+  for (let index = 0; index < mono.length; index += 1) {
+    const sample = Number.isFinite(mono[index]) ? mono[index] : 0;
+    mono[index] = Math.max(-1, Math.min(1, sample));
+  }
   return mono;
 }
 
