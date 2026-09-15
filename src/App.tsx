@@ -362,7 +362,7 @@ export default function App() {
   }, [activeUrl]);
 
   const loadAudio = useCallback(async (file: File) => {
-    if (isDirty && !window.confirm('Discard unsaved pitch edits and open another audio file?')) return;
+    if (isDirty && !window.confirm('Discard unsaved changes and open another audio file?')) return;
     operationId.current += 1;
     const thisOperation = operationId.current;
     analysisAbort.current?.abort();
@@ -483,7 +483,7 @@ export default function App() {
   }, []);
 
   const handleProjectFile = async (file: File) => {
-    if (isDirty && !window.confirm('Discard unsaved pitch edits and open this project?')) return;
+    if (isDirty && !window.confirm('Discard unsaved changes and open this project?')) return;
     operationId.current += 1;
     const thisOperation = operationId.current;
     analysisAbort.current?.abort();

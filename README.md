@@ -48,7 +48,7 @@ Audio imports are limited to 256 MB compressed input, 60 minutes of decoded dura
 - `R` resets the selected note to its detected pitch.
 - `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+S` undo, redo, and save.
 
-Pitch edits and saved editor settings are marked as unsaved. Opening another audio file or project asks before discarding pitch edits.
+Pitch edits and saved editor settings are marked as unsaved. Opening another audio file or project asks before discarding unsaved changes.
 
 ## Privacy first
 
