@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.vite/
+target/
+src-tauri/target/
+*.log
+.DS_Store
+Thumbs.db
+
+# Local audio/project files
+*.wav
+*.flac
+*.mp3
+*.pitchform
+
+# Tauri generated files
+src-tauri/gen/
+
