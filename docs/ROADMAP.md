@@ -11,11 +11,12 @@
 - [x] WAV export and `.pitchform` save/open
 - [x] higher-quality pitch-shift renderer
 - [x] real-audio pipeline evaluation and note-boundary context tuning
+- [x] keyboard editing, reset affordance, dirty-state protection, and analysis progress
 - [ ] perceptual vocal evaluation and listening-based artifact tuning
 
 ## v0.2
 
-Note split/merge, pitch drift and vibrato controls, correction strength, scale/key snap, keyboard shortcuts, autosave, and MIDI export.
+Note split/merge, pitch drift and vibrato controls, correction strength, scale/key snap, autosave, and MIDI export.
 
 ## v0.3+
 

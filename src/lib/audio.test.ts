@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeWav, renderCorrectedSamples } from './audio';
+import { encodeWav, renderCorrectedSamples, validateDecodedAudioBuffer } from './audio';
 import { analyzeMonophonic } from './analysis';
 import type { Note } from '../types';
 
@@ -14,6 +14,12 @@ const note: Note = {
 };
 
 describe('audio rendering', () => {
+  it('rejects decoded audio that could exhaust memory', () => {
+    expect(() => validateDecodedAudioBuffer({ length: 96_000_001, numberOfChannels: 2, duration: 10 })).toThrow(/decoded data/);
+    expect(() => validateDecodedAudioBuffer({ length: 1, numberOfChannels: 1, duration: 3_601 })).toThrow(/60 minutes/);
+    expect(() => validateDecodedAudioBuffer({ length: 48_000, numberOfChannels: 1, duration: 1 })).not.toThrow();
+  });
+
   it('sanitizes non-finite samples and clips at WAV encoding', () => {
     const source = new Float32Array([0, 0.5, 1.5, Number.NaN, -2]);
     const rendered = renderCorrectedSamples(source, 5, []);

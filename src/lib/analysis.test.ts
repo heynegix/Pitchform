@@ -36,6 +36,19 @@ describe('pitch analysis', () => {
     const frames = analyzeMonophonic(sineWave(440, 44100, duration), 44100);
     expect(Math.max(...frames.map((frame) => frame.timeSeconds))).toBeLessThanOrEqual(duration);
   });
+
+  it('reports monotonic analysis progress and finishes at one', () => {
+    const progress: number[] = [];
+    analyzeMonophonic(sineWave(440, 8_000, 0.5), 8_000, {
+      frameSize: 256,
+      hopSize: 64,
+      onProgress: (value) => progress.push(value),
+    });
+    expect(progress.length).toBeGreaterThan(1);
+    expect(progress.every((value) => value >= 0 && value <= 1)).toBe(true);
+    expect(progress.every((value, index) => index === 0 || value >= progress[index - 1])).toBe(true);
+    expect(progress.at(-1)).toBe(1);
+  });
 });
 
 describe('note segmentation', () => {

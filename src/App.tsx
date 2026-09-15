@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorCanvas } from './components/EditorCanvas';
-import { audioBufferToMono, encodeWav, renderCorrectedSamples } from './lib/audio';
+import { audioBufferToMono, encodeWav, renderCorrectedSamples, validateDecodedAudioBuffer } from './lib/audio';
 import { analyzeMonophonic, segmentNotes } from './lib/analysis';
+import { isNotePitchEdited, nudgeNotePitch, noteStateSignature, resetNotePitch, updateNotePitch } from './lib/editor';
 import { base64ToBytes, createPitchformProject, isPitchformProject, MAX_PROJECT_FILE_BYTES, projectToJson, sha256Hex } from './lib/project';
 import type { AudioSourceMetadata, EditorState, Note, PitchFrame, PitchformProject, TimeRange } from './types';
 import './styles.css';
@@ -32,6 +33,11 @@ function notesEqual(left: Note[], right: Note[]): boolean {
       && note.centsOffset === other.centsOffset
       && note.confidence === other.confidence;
   });
+}
+
+function documentSignature(notes: Note[], zoom: number, snapToSemitone: boolean, loopSelection: TimeRange | null): string {
+  const loop = loopSelection ? `${loopSelection.startSeconds}:${loopSelection.endSeconds}` : 'none';
+  return `${noteStateSignature(notes)}|zoom:${zoom}|snap:${snapToSemitone}|loop:${loop}`;
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {
@@ -69,6 +75,7 @@ async function decodeAudioFile(file: File): Promise<{ buffer: AudioBuffer; raw: 
   const context = new Context();
   try {
     const buffer = await context.decodeAudioData(raw.slice(0));
+    validateDecodedAudioBuffer(buffer);
     return { buffer, raw };
   } finally {
     await context.close();
@@ -80,12 +87,17 @@ function isAbortError(error: unknown): boolean {
     || (error instanceof Error && error.name === 'AbortError');
 }
 
-async function analyzeInWorker(samples: Float32Array, sampleRate: number, signal?: AbortSignal): Promise<{ frames: PitchFrame[]; notes: Note[] }> {
+async function analyzeInWorker(
+  samples: Float32Array,
+  sampleRate: number,
+  signal?: AbortSignal,
+  onProgress?: (progress: number) => void,
+): Promise<{ frames: PitchFrame[]; notes: Note[] }> {
   if (signal?.aborted) throw new DOMException('Analysis cancelled.', 'AbortError');
   if (typeof Worker === 'undefined') {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     if (signal?.aborted) throw new DOMException('Analysis cancelled.', 'AbortError');
-    const frames = analyzeMonophonic(samples, sampleRate);
+    const frames = analyzeMonophonic(samples, sampleRate, { onProgress });
     return { frames, notes: segmentNotes(frames, samples.length / sampleRate) };
   }
   return new Promise((resolve, reject) => {
@@ -99,7 +111,7 @@ async function analyzeInWorker(samples: Float32Array, sampleRate: number, signal
           return;
         }
         try {
-          const frames = analyzeMonophonic(samples, sampleRate);
+          const frames = analyzeMonophonic(samples, sampleRate, { onProgress });
           resolve({ frames, notes: segmentNotes(frames, samples.length / sampleRate) });
         } catch (fallbackError) {
           reject(fallbackError instanceof Error ? fallbackError : new Error('Pitch analysis failed.'));
@@ -115,8 +127,12 @@ async function analyzeInWorker(samples: Float32Array, sampleRate: number, signal
       reject(new DOMException('Analysis cancelled.', 'AbortError'));
     };
     signal?.addEventListener('abort', cancel, { once: true });
-    worker.onmessage = (event: MessageEvent<{ frames?: PitchFrame[]; notes?: Note[]; error?: string }>) => {
+    worker.onmessage = (event: MessageEvent<{ frames?: PitchFrame[]; notes?: Note[]; error?: string; progress?: number }>) => {
       if (settled) return;
+      if (typeof event.data?.progress === 'number') {
+        onProgress?.(Math.max(0, Math.min(1, event.data.progress)));
+        return;
+      }
       settled = true;
       signal?.removeEventListener('abort', cancel);
       worker.terminate();
@@ -238,6 +254,8 @@ export default function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [loopSelection, setLoopSelection] = useState<TimeRange | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const savedDocumentSignature = useRef('');
   const [, forceHistoryRender] = useState(0);
   latestNotes.current = notes;
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
@@ -246,6 +264,25 @@ export default function App() {
     ? { start: loopSelection.startSeconds, end: loopSelection.endSeconds }
     : selectedNote ? { start: selectedNote.startSeconds, end: selectedNote.endSeconds } : { start: 0, end: durationSeconds };
   const activeUrl = previewMode === 'original' ? originalUrl : correctedUrl ?? originalUrl;
+
+  const updateDirtyState = (
+    nextNotes: Note[],
+    nextZoom = zoom,
+    nextSnapToSemitone = snapToSemitone,
+    nextLoopSelection = loopSelection,
+  ) => {
+    setIsDirty(documentSignature(nextNotes, nextZoom, nextSnapToSemitone, nextLoopSelection) !== savedDocumentSignature.current);
+  };
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [isDirty]);
 
   useEffect(() => {
     if (!source) {
@@ -325,6 +362,7 @@ export default function App() {
   }, [activeUrl]);
 
   const loadAudio = useCallback(async (file: File) => {
+    if (isDirty && !window.confirm('Discard unsaved pitch edits and open another audio file?')) return;
     operationId.current += 1;
     const thisOperation = operationId.current;
     analysisAbort.current?.abort();
@@ -351,7 +389,9 @@ export default function App() {
       const fingerprint = await sha256Hex(raw);
       if (controller.signal.aborted || thisOperation !== operationId.current) return;
       setStatus('Listening for notes…');
-      const analysis = await analyzeInWorker(samples, buffer.sampleRate, controller.signal);
+      const analysis = await analyzeInWorker(samples, buffer.sampleRate, controller.signal, (progress) => {
+        if (thisOperation === operationId.current) setStatus(`Listening for notes… ${Math.round(progress * 100)}%`);
+      });
       if (controller.signal.aborted || thisOperation !== operationId.current) return;
       setSource({
         file,
@@ -364,6 +404,9 @@ export default function App() {
       setCorrectedSamples(null);
       setCorrectedUrl(null);
       setNotes(analysis.notes);
+      latestNotes.current = analysis.notes;
+      savedDocumentSignature.current = documentSignature(analysis.notes, 1, true, null);
+      setIsDirty(false);
       setSelectedNoteId(analysis.notes[0]?.id ?? null);
       setZoom(1);
       setScrollLeft(0);
@@ -386,7 +429,7 @@ export default function App() {
         if (analysisAbort.current === controller) analysisAbort.current = null;
       }
     }
-  }, []);
+  }, [isDirty]);
 
   const openProject = useCallback(async (project: PitchformProject, expectedOperationId?: number) => {
     const bytes = base64ToBytes(project.audioWavBase64);
@@ -405,6 +448,7 @@ export default function App() {
     const projectNotes = cloneNotes(project.edits.notes);
     setSource({ file, buffer, samples, frames: project.analysis.frames, metadata: { ...project.sourceAudio } });
     setNotes(projectNotes);
+    latestNotes.current = projectNotes;
     setSelectedNoteId(projectNotes[0]?.id ?? null);
     setZoom(project.editorState.zoom);
     setScrollLeft(project.editorState.scrollLeft);
@@ -423,14 +467,23 @@ export default function App() {
     const restoredLoopEnd = typeof savedLoopEnd === 'number'
       ? Math.max(0, Math.min(buffer.duration, savedLoopEnd))
       : null;
-    setLoopSelection(restoredLoopStart !== null && restoredLoopEnd !== null && restoredLoopEnd > restoredLoopStart
+    const restoredLoopSelection = restoredLoopStart !== null && restoredLoopEnd !== null && restoredLoopEnd > restoredLoopStart
       ? { startSeconds: restoredLoopStart, endSeconds: restoredLoopEnd }
-      : null);
+      : null;
+    savedDocumentSignature.current = documentSignature(
+      projectNotes,
+      project.editorState.zoom,
+      project.editorState.snapToSemitone,
+      restoredLoopSelection,
+    );
+    setIsDirty(false);
+    setLoopSelection(restoredLoopSelection);
     setPreviewMode('corrected');
     setStatus(`Opened ${project.sourceAudio.name}`);
   }, []);
 
   const handleProjectFile = async (file: File) => {
+    if (isDirty && !window.confirm('Discard unsaved pitch edits and open this project?')) return;
     operationId.current += 1;
     const thisOperation = operationId.current;
     analysisAbort.current?.abort();
@@ -463,11 +516,9 @@ export default function App() {
   };
 
   const changeNotePitch = (noteId: string, pitch: number, fine: boolean) => {
-    const quantized = fine ? Math.round(pitch * 4) / 4 : Math.round(pitch);
-    const target = Math.max(0, Math.min(127, Number.isFinite(quantized) ? quantized : 0));
-    setNotes((current) => current.map((note) => note.id === noteId
-      ? { ...note, targetPitchMidi: target, centsOffset: (target - note.originalPitchMidi) * 100 }
-      : note));
+    const nextNotes = latestNotes.current.map((note) => note.id === noteId ? updateNotePitch(note, pitch, fine) : note);
+    latestNotes.current = nextNotes;
+    setNotes(nextNotes);
   };
 
   const beginNoteEdit = () => {
@@ -481,6 +532,7 @@ export default function App() {
     if (notesEqual(before, latestNotes.current)) return;
     history.current.push(before);
     future.current = [];
+    updateDirtyState(latestNotes.current);
     forceHistoryRender((value) => value + 1);
     setStatus('Note edit ready to preview');
   };
@@ -489,7 +541,10 @@ export default function App() {
     const previous = history.current.pop();
     if (!previous) return;
     future.current.push(cloneNotes(latestNotes.current));
-    setNotes(cloneNotes(previous));
+    const nextNotes = cloneNotes(previous);
+    latestNotes.current = nextNotes;
+    setNotes(nextNotes);
+    updateDirtyState(nextNotes);
     forceHistoryRender((value) => value + 1);
     setStatus('Undid last edit');
   };
@@ -498,9 +553,44 @@ export default function App() {
     const next = future.current.pop();
     if (!next) return;
     history.current.push(cloneNotes(latestNotes.current));
-    setNotes(cloneNotes(next));
+    const nextNotes = cloneNotes(next);
+    latestNotes.current = nextNotes;
+    setNotes(nextNotes);
+    updateDirtyState(nextNotes);
     forceHistoryRender((value) => value + 1);
     setStatus('Redid last edit');
+  };
+
+  const nudgeSelectedNote = (direction: -1 | 1, fine: boolean) => {
+    if (!selectedNoteId) return;
+    const before = latestNotes.current;
+    const selected = before.find((note) => note.id === selectedNoteId);
+    if (!selected) return;
+    const updated = nudgeNotePitch(selected, direction, fine);
+    if (updated.targetPitchMidi === selected.targetPitchMidi) return;
+    history.current.push(cloneNotes(before));
+    future.current = [];
+    const nextNotes = before.map((note) => note.id === selectedNoteId ? updated : note);
+    latestNotes.current = nextNotes;
+    setNotes(nextNotes);
+    updateDirtyState(nextNotes);
+    forceHistoryRender((value) => value + 1);
+    setStatus('Note nudged');
+  };
+
+  const resetSelectedNote = () => {
+    if (!selectedNoteId) return;
+    const before = latestNotes.current;
+    const selected = before.find((note) => note.id === selectedNoteId);
+    if (!selected || !isNotePitchEdited(selected)) return;
+    const nextNotes = before.map((note) => note.id === selectedNoteId ? resetNotePitch(note) : note);
+    history.current.push(cloneNotes(before));
+    future.current = [];
+    latestNotes.current = nextNotes;
+    setNotes(nextNotes);
+    updateDirtyState(nextNotes);
+    forceHistoryRender((value) => value + 1);
+    setStatus('Selected note reset');
   };
 
   const togglePlay = () => {
@@ -561,6 +651,8 @@ export default function App() {
       const metadata: AudioSourceMetadata = { ...source.metadata };
       const project = createPitchformProject(metadata, source.buffer.sampleRate, durationSeconds, source.samples, source.frames, notes, editorState);
       downloadBlob(new Blob([projectToJson(project)], { type: 'application/json' }), `${outputBaseName(source.file.name)}.pitchform`);
+      savedDocumentSignature.current = documentSignature(notes, zoom, snapToSemitone, loopSelection);
+      setIsDirty(false);
       setStatus('Project saved offline');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save the project.');
@@ -606,8 +698,58 @@ export default function App() {
     setIsPlaying(false);
   };
 
+  const handleGlobalKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const tagName = target?.tagName;
+    const isTextEntry = tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+    const isButton = tagName === 'BUTTON';
+    if (isTextEntry || isButton) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      if (source && !isBusy && !isRendering) handleSaveProject();
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) redo(); else undo();
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === 'y') {
+      event.preventDefault();
+      redo();
+      return;
+    }
+    if (!source || isBusy) return;
+    if (event.key === ' ') {
+      event.preventDefault();
+      togglePlay();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      nudgeSelectedNote(1, event.shiftKey);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      nudgeSelectedNote(-1, event.shiftKey);
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      if (notes.length === 0) return;
+      event.preventDefault();
+      const currentIndex = selectedNoteId ? notes.findIndex((note) => note.id === selectedNoteId) : -1;
+      const nextIndex = event.key === 'ArrowRight'
+        ? Math.min(notes.length - 1, currentIndex + 1)
+        : Math.max(0, currentIndex - 1);
+      const nextNote = notes[nextIndex];
+      if (nextNote) {
+        setSelectedNoteId(nextNote.id);
+        seekTo(nextNote.startSeconds);
+      }
+    } else if (event.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      resetSelectedNote();
+    }
+  };
+
   return (
-    <div className="app-shell" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+    <div className="app-shell" onKeyDown={handleGlobalKeyDown} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
       <header className="topbar">
         <div className="brand-lockup">
           <div className="brand-mark">P</div>
@@ -618,7 +760,7 @@ export default function App() {
         </div>
         <div className="top-actions">
           <button className="quiet-button" onClick={() => projectInputRef.current?.click()}>Open</button>
-          <button className="quiet-button" onClick={handleSaveProject} disabled={!source || isBusy || isRendering}>Save project</button>
+          <button className="quiet-button" onClick={handleSaveProject} disabled={!source || isBusy || isRendering}>Save project{isDirty ? ' *' : ''}</button>
           <button className="primary-button" onClick={handleExport} disabled={!source || isBusy || isRendering}>Export WAV</button>
         </div>
       </header>
@@ -648,7 +790,7 @@ export default function App() {
               <div className="toolbar-group">
                 <button className="icon-button" onClick={undo} disabled={history.current.length === 0} aria-label="Undo">↶</button>
                 <button className="icon-button" onClick={redo} disabled={future.current.length === 0} aria-label="Redo">↷</button>
-                <label className="zoom-control">Zoom <input type="range" min="1" max="4" step="0.5" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
+                <label className="zoom-control">Zoom <input type="range" min="1" max="4" step="0.5" value={zoom} onChange={(event) => { const nextZoom = Number(event.target.value); setZoom(nextZoom); updateDirtyState(latestNotes.current, nextZoom); }} /></label>
               </div>
             </div>
             <EditorCanvas
@@ -665,7 +807,7 @@ export default function App() {
               onScrollLeftChange={setScrollLeft}
               onSelectNote={(noteId) => { setSelectedNoteId(noteId); if (noteId) { const note = notes.find((item) => item.id === noteId); if (note) seekTo(note.startSeconds); } }}
               onSeekSeconds={seekTo}
-              onLoopSelectionChange={(selection) => { setLoopSelection(selection && selection.endSeconds > selection.startSeconds ? selection : null); }}
+              onLoopSelectionChange={(selection) => { const nextSelection = selection && selection.endSeconds > selection.startSeconds ? selection : null; setLoopSelection(nextSelection); updateDirtyState(latestNotes.current, zoom, snapToSemitone, nextSelection); }}
               onChangeNotePitch={(noteId, pitch, fine) => { beginNoteEdit(); changeNotePitch(noteId, pitch, fine); }}
               onCommitNotePitch={commitNoteEdit}
             />
@@ -675,17 +817,17 @@ export default function App() {
                 <div><strong>{source.file.name}</strong><span>{durationSeconds.toFixed(1)} sec · {source.buffer.sampleRate.toLocaleString()} Hz · {notes.length} notes</span></div>
               </div>
               <div className="edit-summary">
-                {selectedNote ? <><span className="eyebrow">SELECTED NOTE</span><strong>{selectedNote.targetPitchMidi.toFixed(2)} MIDI</strong><span className={selectedNote.targetPitchMidi === Math.round(selectedNote.originalPitchMidi) ? 'neutral' : 'accent'}>{selectedNote.targetPitchMidi - selectedNote.originalPitchMidi >= 0 ? '+' : ''}{(selectedNote.targetPitchMidi - selectedNote.originalPitchMidi).toFixed(2)} semitones</span></> : <span>Select a note to edit</span>}
+                {selectedNote ? <><span className="eyebrow">SELECTED NOTE</span><strong>{selectedNote.targetPitchMidi.toFixed(2)} MIDI</strong><span className={selectedNote.targetPitchMidi === Math.round(selectedNote.originalPitchMidi) ? 'neutral' : 'accent'}>{selectedNote.targetPitchMidi - selectedNote.originalPitchMidi >= 0 ? '+' : ''}{(selectedNote.targetPitchMidi - selectedNote.originalPitchMidi).toFixed(2)} semitones</span><button className="reset-button" onClick={resetSelectedNote} disabled={!isNotePitchEdited(selectedNote) || isBusy || isRendering}>Reset</button></> : <span>Select a note to edit</span>}
               </div>
               <div className="edit-options">
-                <label><input type="checkbox" checked={snapToSemitone} onChange={(event) => setSnapToSemitone(event.target.checked)} /> Snap</label>
-                <span className="hint">Alt-drag for loop · Shift-drag for fine pitch</span>
+                <label><input type="checkbox" checked={snapToSemitone} onChange={(event) => { const nextSnapToSemitone = event.target.checked; setSnapToSemitone(nextSnapToSemitone); updateDirtyState(latestNotes.current, zoom, nextSnapToSemitone, loopSelection); }} /> Snap</label>
+                <span className="hint">Shift-drag / ↑↓ for fine pitch · R reset · Space play</span>
               </div>
             </div>
           </section>
         )}
 
-        <div className="status-line" role="status"><span className={isBusy || isRendering ? 'status-dot busy' : 'status-dot'} />{isBusy ? status : isRendering ? 'Rendering corrected preview…' : status}{loopEnabled && durationSeconds > 0 ? ` · loop ${formatTime(loopRange.start)}–${formatTime(loopRange.end)}` : ''}</div>
+        <div className="status-line" role="status" aria-live="polite"><span className={isBusy || isRendering ? 'status-dot busy' : 'status-dot'} />{isBusy ? status : isRendering ? 'Rendering corrected preview…' : status}{isDirty ? ' · unsaved changes' : ''}{loopEnabled && durationSeconds > 0 ? ` · loop ${formatTime(loopRange.start)}–${formatTime(loopRange.end)}` : ''}</div>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError(null)}>Dismiss</button></div>}
       </main>
 

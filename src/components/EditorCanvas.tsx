@@ -374,9 +374,11 @@ export function EditorCanvas({
   return (
     <div className="editor-scroll" ref={scrollerRef} onScroll={(event) => onScrollLeftChange(event.currentTarget.scrollLeft)}>
       <canvas
-        aria-label="Pitchform piano roll editor"
+        aria-keyshortcuts="ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown R Space Control+Z Control+Shift+Z Control+S"
+        aria-label="Pitchform piano roll editor. Select a note, use arrow keys to change pitch, and press R to reset."
         className="editor-canvas"
         ref={canvasRef}
+        tabIndex={0}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
