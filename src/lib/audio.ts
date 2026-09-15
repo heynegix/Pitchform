@@ -49,9 +49,10 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
 }
 
 export function renderCorrectedSamples(samples: Float32Array, sampleRate: number, notes: Note[]): Float32Array {
-  if (!Number.isFinite(sampleRate) || sampleRate <= 0) return new Float32Array(samples.length);
   const rendered = new Float32Array(samples.length);
   for (let index = 0; index < samples.length; index += 1) rendered[index] = Number.isFinite(samples[index]) ? samples[index] : 0;
+  // A bad rate must never turn an otherwise valid source into silent output.
+  if (!Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 384_000) return rendered;
   const orderedNotes = notes
     .filter((note) => Number.isFinite(note.startSeconds)
       && Number.isFinite(note.endSeconds)

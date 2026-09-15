@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Note, PitchFrame, TimeRange } from '../types';
+import { clientXToSeconds, isClientXInTimeline, secondsToCanvasX, TIMELINE_GUTTER_PX } from '../lib/timeline';
 
 interface EditorCanvasProps {
   durationSeconds: number;
@@ -11,10 +12,11 @@ interface EditorCanvasProps {
   snapToSemitone: boolean;
   playheadSeconds: number;
   loopSelection: TimeRange | null;
+  scrollLeft: number;
   onScrollLeftChange: (scrollLeft: number) => void;
   onSelectNote: (noteId: string | null) => void;
   onSeekSeconds: (seconds: number) => void;
-  onLoopSelectionChange: (selection: TimeRange) => void;
+  onLoopSelectionChange: (selection: TimeRange | null) => void;
   onChangeNotePitch: (noteId: string, pitch: number, fine: boolean) => void;
   onCommitNotePitch: (noteId: string) => void;
 }
@@ -22,7 +24,7 @@ interface EditorCanvasProps {
 const CANVAS_HEIGHT = 520;
 const TOP_PADDING = 28;
 const WAVEFORM_HEIGHT = 74;
-const PIANO_WIDTH = 52;
+const PIANO_WIDTH = TIMELINE_GUTTER_PX;
 const MAX_DRAWN_FRAMES = 12_000;
 
 function pitchBounds(notes: Note[]): { topMidi: number; bottomMidi: number } {
@@ -51,6 +53,7 @@ export function EditorCanvas({
   snapToSemitone,
   playheadSeconds,
   loopSelection,
+  scrollLeft,
   onScrollLeftChange,
   onSelectNote,
   onSeekSeconds,
@@ -61,7 +64,8 @@ export function EditorCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ noteId: string; pointerId: number } | null>(null);
-  const loopDragRef = useRef<{ pointerId: number; startSeconds: number } | null>(null);
+  const loopDragRef = useRef<{ pointerId: number; startSeconds: number; previousSelection: TimeRange | null } | null>(null);
+  const pitchBoundsRef = useRef(pitchBounds(notes));
   const [viewportWidth, setViewportWidth] = useState(900);
   const timelineWidth = Math.max(760, viewportWidth * Math.max(1, zoom));
 
@@ -81,6 +85,16 @@ export function EditorCanvas({
   }, []);
 
   useEffect(() => {
+    const element = scrollerRef.current;
+    if (!element || Math.abs(element.scrollLeft - scrollLeft) < 1) return;
+    element.scrollLeft = Math.max(0, scrollLeft);
+  }, [scrollLeft]);
+
+  useEffect(() => {
+    if (!dragRef.current) pitchBoundsRef.current = pitchBounds(notes);
+  }, [notes]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || durationSeconds <= 0) return;
     const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
@@ -94,9 +108,11 @@ export function EditorCanvas({
     const width = timelineWidth;
     const height = CANVAS_HEIGHT;
     const chartBottom = height - WAVEFORM_HEIGHT;
-    const { topMidi, bottomMidi } = pitchBounds(notes);
+    const timelineLeft = PIANO_WIDTH;
+    const timelinePixels = Math.max(1, width - timelineLeft);
+    const { topMidi, bottomMidi } = dragRef.current ? pitchBoundsRef.current : pitchBounds(notes);
     const pitchRange = Math.max(12, topMidi - bottomMidi);
-    const timeToX = (seconds: number) => (seconds / durationSeconds) * width;
+    const timeToX = (seconds: number) => secondsToCanvasX(seconds, durationSeconds, width);
     const pitchToY = (midi: number) => TOP_PADDING + ((topMidi - midi) / pitchRange) * (chartBottom - TOP_PADDING - 12);
 
     context.fillStyle = '#111827';
@@ -119,7 +135,9 @@ export function EditorCanvas({
       }
     }
 
-    const secondsPerGrid = zoom >= 2 ? 0.5 : 1;
+    const baseSecondsPerGrid = zoom >= 2 ? 0.5 : 1;
+    const secondsPerGrid = Math.max(baseSecondsPerGrid, Math.ceil(durationSeconds / (baseSecondsPerGrid * 2_000)) * baseSecondsPerGrid);
+    const gridDecimals = secondsPerGrid % 1 === 0 ? 0 : 1;
     for (let seconds = 0; seconds <= durationSeconds; seconds += secondsPerGrid) {
       const x = timeToX(seconds);
       context.strokeStyle = '#243244';
@@ -130,7 +148,7 @@ export function EditorCanvas({
       context.stroke();
       context.fillStyle = '#64748b';
       context.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
-      context.fillText(`${seconds.toFixed(secondsPerGrid < 1 ? 1 : 0)}s`, x + 4, 16);
+      context.fillText(`${seconds.toFixed(gridDecimals)}s`, x + 4, 16);
     }
 
     // Piano keys form a stable visual anchor on the left edge of the editor.
@@ -205,17 +223,17 @@ export function EditorCanvas({
       }
     }
 
-    const waveformStep = Math.max(1, Math.ceil(waveform.length / Math.max(1, width)));
+    const waveformStep = Math.max(1, Math.ceil(waveform.length / timelinePixels));
     context.strokeStyle = '#38bdf8';
     context.globalAlpha = 0.75;
     context.beginPath();
-    for (let pixel = 0; pixel < width; pixel += 1) {
+    for (let pixel = 0; pixel < timelinePixels; pixel += 1) {
       const start = pixel * waveformStep;
       const end = Math.min(waveform.length, start + waveformStep);
       if (start >= end) break;
       let peak = 0;
       for (let index = start; index < end; index += 1) peak = Math.max(peak, Math.abs(waveform[index]));
-      const x = pixel;
+      const x = timelineLeft + pixel;
       const amplitude = Math.min(1, peak) * (WAVEFORM_HEIGHT / 2 - 10);
       const center = chartBottom + WAVEFORM_HEIGHT / 2;
       context.moveTo(x, center - amplitude);
@@ -225,7 +243,7 @@ export function EditorCanvas({
     context.globalAlpha = 1;
     context.fillStyle = '#64748b';
     context.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
-    context.fillText('WAVEFORM', 10, chartBottom + 16);
+    context.fillText('WAVEFORM', timelineLeft + 10, chartBottom + 16);
 
     const playheadX = timeToX(Math.max(0, Math.min(durationSeconds, playheadSeconds)));
     context.strokeStyle = '#f8fafc';
@@ -240,8 +258,14 @@ export function EditorCanvas({
     const canvas = canvasRef.current;
     if (!canvas || durationSeconds <= 0) return 0;
     const rect = canvas.getBoundingClientRect();
-    if (rect.width <= 0) return 0;
-    return Math.max(0, Math.min(durationSeconds, ((clientX - rect.left) / rect.width) * durationSeconds));
+    return clientXToSeconds(clientX, rect.left, rect.width, durationSeconds);
+  };
+
+  const isTimelineClientX = (clientX: number): boolean => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    const rect = canvas.getBoundingClientRect();
+    return isClientXInTimeline(clientX, rect.left, rect.width);
   };
 
   const pitchAtClientY = (clientY: number): number => {
@@ -249,7 +273,7 @@ export function EditorCanvas({
     if (!canvas) return 60;
     const rect = canvas.getBoundingClientRect();
     const chartBottom = CANVAS_HEIGHT - WAVEFORM_HEIGHT;
-    const { topMidi, bottomMidi } = pitchBounds(notes);
+    const { topMidi, bottomMidi } = dragRef.current ? pitchBoundsRef.current : pitchBounds(notes);
     const pitchRange = Math.max(12, topMidi - bottomMidi);
     return topMidi - ((clientY - rect.top - TOP_PADDING) / (chartBottom - TOP_PADDING - 12)) * pitchRange;
   };
@@ -257,6 +281,10 @@ export function EditorCanvas({
   const noteAtClientPoint = (clientX: number, clientY: number): Note | undefined => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
+    const rect = canvas.getBoundingClientRect();
+    const relativeX = clientX - rect.left;
+    const relativeY = clientY - rect.top;
+    if (relativeX < PIANO_WIDTH || relativeY < 0 || relativeY > CANVAS_HEIGHT - WAVEFORM_HEIGHT) return undefined;
     const seconds = timeAtClientX(clientX);
     const pitch = pitchAtClientY(clientY);
     for (let index = notes.length - 1; index >= 0; index -= 1) {
@@ -269,6 +297,7 @@ export function EditorCanvas({
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
     if (event.altKey) {
+      if (!isTimelineClientX(event.clientX)) return;
       event.preventDefault();
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -276,14 +305,14 @@ export function EditorCanvas({
         return;
       }
       const startSeconds = timeAtClientX(event.clientX);
-      loopDragRef.current = { pointerId: event.pointerId, startSeconds };
+      loopDragRef.current = { pointerId: event.pointerId, startSeconds, previousSelection: loopSelection };
       onLoopSelectionChange({ startSeconds, endSeconds: startSeconds });
       return;
     }
     const note = noteAtClientPoint(event.clientX, event.clientY);
     if (!note) {
       onSelectNote(null);
-      onSeekSeconds(timeAtClientX(event.clientX));
+      if (isTimelineClientX(event.clientX)) onSeekSeconds(timeAtClientX(event.clientX));
       return;
     }
     try {
@@ -292,6 +321,7 @@ export function EditorCanvas({
       // Some embedded webviews can lose the canvas between pointerdown and capture.
       return;
     }
+    pitchBoundsRef.current = pitchBounds(notes);
     dragRef.current = { noteId: note.id, pointerId: event.pointerId };
     onSelectNote(note.id);
   };
@@ -330,6 +360,17 @@ export function EditorCanvas({
     onCommitNotePitch(drag.noteId);
   };
 
+  const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const loopDrag = loopDragRef.current;
+    if (loopDrag && loopDrag.pointerId === event.pointerId) {
+      loopDragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      onLoopSelectionChange(loopDrag.previousSelection);
+      return;
+    }
+    handlePointerUp(event);
+  };
+
   return (
     <div className="editor-scroll" ref={scrollerRef} onScroll={(event) => onScrollLeftChange(event.currentTarget.scrollLeft)}>
       <canvas
@@ -339,7 +380,7 @@ export function EditorCanvas({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
       />
     </div>
   );

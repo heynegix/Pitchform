@@ -40,4 +40,8 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 - project files are size- and shape-validated before their embedded audio is decoded;
 - embedded project audio is capped at 256 MB of project JSON and must match the stored duration; the decoded sample rate may vary because browsers can resample through `AudioContext`;
 - loop ranges are optional, finite, strictly positive, and bounded by the analyzed duration; older projects without loop fields remain valid;
+- imported audio files are capped at 256 MB before decoding, and a new document resets transport/editor viewport state rather than inheriting the previous document's position;
+- timeline coordinates exclude the fixed piano-key gutter, so drawing, seeking, waveform peaks, notes, and loop ranges share one time origin;
+- undo/redo stacks are mutated outside React state updater callbacks and a small render signal keeps toolbar availability synchronized without Strict Mode side effects;
+- CI runs frontend checks plus Rust/Tauri checks on Ubuntu, Windows, and macOS, with dependency auditing and bounded job duration;
 - only the newest load/render operation may update application state.

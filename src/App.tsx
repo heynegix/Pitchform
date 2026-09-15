@@ -14,6 +14,8 @@ interface LoadedSource {
   metadata: AudioSourceMetadata;
 }
 
+const MAX_AUDIO_FILE_BYTES = 256_000_000;
+
 function cloneNotes(notes: Note[]): Note[] {
   return notes.map((note) => ({ ...note }));
 }
@@ -215,6 +217,7 @@ export default function App() {
   const dragStartNotes = useRef<Note[] | null>(null);
   const history = useRef<Note[][]>([]);
   const future = useRef<Note[][]>([]);
+  const latestNotes = useRef<Note[]>([]);
   const operationId = useRef(0);
   const analysisAbort = useRef<AbortController | null>(null);
   const [source, setSource] = useState<LoadedSource | null>(null);
@@ -235,6 +238,8 @@ export default function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
   const [loopSelection, setLoopSelection] = useState<TimeRange | null>(null);
+  const [, forceHistoryRender] = useState(0);
+  latestNotes.current = notes;
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
   const durationSeconds = source?.buffer.duration ?? 0;
   const loopRange = loopSelection
@@ -306,7 +311,13 @@ export default function App() {
     audio.src = activeUrl;
     audio.load();
     const restore = () => {
-      audio.currentTime = Math.min(time, Number.isFinite(audio.duration) ? audio.duration : time);
+      const duration = Number.isFinite(audio.duration) && audio.duration >= 0 ? audio.duration : undefined;
+      const target = Number.isFinite(time) ? Math.max(0, duration === undefined ? time : Math.min(time, duration)) : 0;
+      try {
+        audio.currentTime = target;
+      } catch {
+        setPlayheadSeconds(0);
+      }
       if (shouldResume) void audio.play().catch(() => setIsPlaying(false));
     };
     audio.addEventListener('loadedmetadata', restore, { once: true });
@@ -322,10 +333,18 @@ export default function App() {
     setError(null);
     setIsBusy(true);
     audioRef.current?.pause();
+    if (audioRef.current) {
+      try {
+        audioRef.current.currentTime = 0;
+      } catch {
+        // The media element may not have a source yet.
+      }
+    }
     setIsPlaying(false);
     setLoopEnabled(false);
     setStatus(`Loading ${file.name}…`);
     try {
+      if (file.size > MAX_AUDIO_FILE_BYTES) throw new Error('This audio file is too large to open safely (maximum 256 MB).');
       const { buffer, raw } = await decodeAudioFile(file);
       if (controller.signal.aborted || thisOperation !== operationId.current) return;
       const samples = audioBufferToMono(buffer);
@@ -341,10 +360,18 @@ export default function App() {
         frames: analysis.frames,
         metadata: { name: file.name, size: file.size, lastModified: file.lastModified, sha256: fingerprint },
       });
+      setOriginalUrl(null);
+      setCorrectedSamples(null);
+      setCorrectedUrl(null);
       setNotes(analysis.notes);
       setSelectedNoteId(analysis.notes[0]?.id ?? null);
+      setZoom(1);
+      setScrollLeft(0);
+      setSnapToSemitone(true);
+      dragStartNotes.current = null;
       history.current = [];
       future.current = [];
+      forceHistoryRender((value) => value + 1);
       setPlayheadSeconds(0);
       setLoopSelection(null);
       setPreviewMode('corrected');
@@ -372,6 +399,9 @@ export default function App() {
       throw new Error('The project audio does not match its analysis duration.');
     }
     const samples = audioBufferToMono(buffer);
+    setOriginalUrl(null);
+    setCorrectedSamples(null);
+    setCorrectedUrl(null);
     const projectNotes = cloneNotes(project.edits.notes);
     setSource({ file, buffer, samples, frames: project.analysis.frames, metadata: { ...project.sourceAudio } });
     setNotes(projectNotes);
@@ -379,8 +409,10 @@ export default function App() {
     setZoom(project.editorState.zoom);
     setScrollLeft(project.editorState.scrollLeft);
     setSnapToSemitone(project.editorState.snapToSemitone);
+    dragStartNotes.current = null;
     history.current = [];
     future.current = [];
+    forceHistoryRender((value) => value + 1);
     setPlayheadSeconds(0);
     setLoopEnabled(false);
     const savedLoopStart = project.editorState.loopStartSeconds;
@@ -405,6 +437,13 @@ export default function App() {
     setError(null);
     setIsBusy(true);
     audioRef.current?.pause();
+    if (audioRef.current) {
+      try {
+        audioRef.current.currentTime = 0;
+      } catch {
+        // The media element may not have a source yet.
+      }
+    }
     setIsPlaying(false);
     setStatus(`Opening ${file.name}…`);
     try {
@@ -424,7 +463,8 @@ export default function App() {
   };
 
   const changeNotePitch = (noteId: string, pitch: number, fine: boolean) => {
-    const target = fine ? Math.round(pitch * 4) / 4 : Math.round(pitch);
+    const quantized = fine ? Math.round(pitch * 4) / 4 : Math.round(pitch);
+    const target = Math.max(0, Math.min(127, Number.isFinite(quantized) ? quantized : 0));
     setNotes((current) => current.map((note) => note.id === noteId
       ? { ...note, targetPitchMidi: target, centsOffset: (target - note.originalPitchMidi) * 100 }
       : note));
@@ -438,32 +478,28 @@ export default function App() {
     const before = dragStartNotes.current;
     dragStartNotes.current = null;
     if (!before) return;
-    setNotes((current) => {
-      if (notesEqual(before, current)) return current;
-      history.current.push(before);
-      future.current = [];
-      return current;
-    });
+    if (notesEqual(before, latestNotes.current)) return;
+    history.current.push(before);
+    future.current = [];
+    forceHistoryRender((value) => value + 1);
     setStatus('Note edit ready to preview');
   };
 
   const undo = () => {
     const previous = history.current.pop();
     if (!previous) return;
-    setNotes((current) => {
-      future.current.push(cloneNotes(current));
-      return cloneNotes(previous);
-    });
+    future.current.push(cloneNotes(latestNotes.current));
+    setNotes(cloneNotes(previous));
+    forceHistoryRender((value) => value + 1);
     setStatus('Undid last edit');
   };
 
   const redo = () => {
     const next = future.current.pop();
     if (!next) return;
-    setNotes((current) => {
-      history.current.push(cloneNotes(current));
-      return cloneNotes(next);
-    });
+    history.current.push(cloneNotes(latestNotes.current));
+    setNotes(cloneNotes(next));
+    forceHistoryRender((value) => value + 1);
     setStatus('Redid last edit');
   };
 
@@ -473,8 +509,7 @@ export default function App() {
     if (audio.paused) {
       if (loopEnabled && loopRange.end > loopRange.start
         && (audio.currentTime < loopRange.start || audio.currentTime >= loopRange.end)) {
-        audio.currentTime = loopRange.start;
-        setPlayheadSeconds(loopRange.start);
+        seekTo(loopRange.start);
       }
       void audio.play().then(() => setIsPlaying(true)).catch(() => setError('Playback was blocked by the browser.'));
     }
@@ -485,8 +520,7 @@ export default function App() {
     const audio = audioRef.current;
     if (!audio) return;
     audio.pause();
-    audio.currentTime = 0;
-    setPlayheadSeconds(0);
+    seekTo(0);
   };
 
   const toggleLoop = () => {
@@ -557,8 +591,7 @@ export default function App() {
     const currentTime = Number.isFinite(audio.currentTime) ? Math.max(0, Math.min(durationSeconds, audio.currentTime)) : 0;
     setPlayheadSeconds(currentTime);
     if (loopEnabled && loopRange.end > loopRange.start && currentTime >= loopRange.end) {
-      audio.currentTime = loopRange.start;
-      setPlayheadSeconds(loopRange.start);
+      seekTo(loopRange.start);
       void audio.play().catch(() => setIsPlaying(false));
     }
   };
@@ -566,8 +599,7 @@ export default function App() {
   const onEnded = () => {
     const audio = audioRef.current;
     if (loopEnabled && audio && loopRange.end > loopRange.start) {
-      audio.currentTime = loopRange.start;
-      setPlayheadSeconds(loopRange.start);
+      seekTo(loopRange.start);
       void audio.play().catch(() => setIsPlaying(false));
       return;
     }
@@ -629,10 +661,11 @@ export default function App() {
               snapToSemitone={snapToSemitone}
               playheadSeconds={playheadSeconds}
               loopSelection={loopSelection}
+              scrollLeft={scrollLeft}
               onScrollLeftChange={setScrollLeft}
               onSelectNote={(noteId) => { setSelectedNoteId(noteId); if (noteId) { const note = notes.find((item) => item.id === noteId); if (note) seekTo(note.startSeconds); } }}
               onSeekSeconds={seekTo}
-              onLoopSelectionChange={(selection) => { setLoopSelection(selection.endSeconds > selection.startSeconds ? selection : null); }}
+              onLoopSelectionChange={(selection) => { setLoopSelection(selection && selection.endSeconds > selection.startSeconds ? selection : null); }}
               onChangeNotePitch={(noteId, pitch, fine) => { beginNoteEdit(); changeNotePitch(noteId, pitch, fine); }}
               onCommitNotePitch={commitNoteEdit}
             />
@@ -657,7 +690,7 @@ export default function App() {
       </main>
 
       <footer className="footer"><span>Local first · no uploads · no account</span><span>Pitchform {0.1.toFixed(1)}</span></footer>
-      <audio ref={audioRef} onTimeUpdate={onTimeUpdate} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={onEnded} />
+      <audio ref={audioRef} onTimeUpdate={onTimeUpdate} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={onEnded} onError={() => setError('Could not play the current audio preview.')} />
       <input ref={audioInputRef} type="file" hidden accept="audio/wav,audio/x-wav,audio/mpeg,audio/flac,.wav,.mp3,.flac" onChange={(event) => { const file = event.target.files?.[0]; if (file) void loadAudio(file); event.target.value = ''; }} />
       <input ref={projectInputRef} type="file" hidden accept="application/json,.pitchform" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProjectFile(file); event.target.value = ''; }} />
     </div>

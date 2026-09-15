@@ -31,6 +31,7 @@ describe('pitch analysis', () => {
 
   it('rejects invalid sample rates and keeps frame timestamps inside the clip', () => {
     expect(analyzeMonophonic(sineWave(440, 44100, 0.1), Number.NaN)).toEqual([]);
+    expect(analyzeMonophonic(sineWave(440, 44100, 0.1), 44_100.5)).toEqual([]);
     const duration = 0.037;
     const frames = analyzeMonophonic(sineWave(440, 44100, duration), 44100);
     expect(Math.max(...frames.map((frame) => frame.timeSeconds))).toBeLessThanOrEqual(duration);
