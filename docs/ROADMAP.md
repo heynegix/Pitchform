@@ -9,7 +9,8 @@
 - [x] note selection, vertical drag, snap/fine adjustment
 - [x] undo/redo and original/corrected A/B preview
 - [x] WAV export and `.pitchform` save/open
-- [ ] higher-quality pitch-shift renderer and real-world vocal evaluation
+- [x] higher-quality pitch-shift renderer
+- [ ] real-world vocal evaluation and artifact tuning
 
 ## v0.2
 
@@ -22,4 +23,3 @@ Better segmentation, formant preservation, sibilant handling, batch processing, 
 ## Deliberately deferred
 
 Polyphonic DNA-style editing, realtime autotune, live microphone correction, VST3/AU/ARA, collaboration, accounts, cloud sync, and generative AI are not v0.1 work.
-

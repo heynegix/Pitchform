@@ -28,7 +28,7 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 4. Rule-based segmentation groups stable voiced frames into editable `Note` objects.
 5. The editor changes only `targetPitchMidi`; original analysis remains immutable.
 6. Canvas clicks seek the transport, while Alt-drag creates an explicit loop range. A loop selection is editor state, not an audio edit, and is restored when a project is reopened.
-7. Preview/export uses a deterministic per-note resampling renderer in a dedicated worker. It preserves the project timeline and is deliberately replaceable by a higher-quality phase-vocoder or neural backend later.
+7. Preview/export uses a deterministic per-note pitch-shift renderer in a dedicated worker. Sustained notes use a dependency-free phase-vocoder path that preserves duration; short or very large notes use a bounded linear fallback. The renderer boundary remains replaceable by a higher-quality or neural backend later.
 
 ## Invariants
 
