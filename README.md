@@ -19,6 +19,7 @@ Pitchform is an early `0.1.0` MVP foundation. The current app already includes:
 - rule-based note segmentation
 - vertical note dragging with semitone snapping and fine adjustment
 - undo/redo, original/corrected A/B preview, and WAV export
+- duration-preserving phase-vocoder preview for sustained note corrections
 - self-contained `.pitchform` JSON project files
 - no account, cloud upload, telemetry, or required API key
 

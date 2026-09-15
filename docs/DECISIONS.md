@@ -35,3 +35,7 @@ The editor reserves a fixed left gutter for piano keys. Timeline coordinates beg
 ## 2026-09-15 — Check in generated desktop bundle icons
 
 Tauri's Windows resource build and future macOS/Windows bundling require platform-specific icon files. The checked-in assets are generated from the project icon with the Tauri CLI and are explicitly listed in `tauri.conf.json`, so a clean runner can build the desktop bundle without relying on a developer's local generated files.
+
+## 2026-09-15 — Use a dependency-free phase-vocoder preview backend
+
+The first renderer's per-note sample re-indexing changed pitch by effectively speeding up or slowing down each note and could hold the final sample at note boundaries. A small FFT phase-vocoder path now preserves note duration for sustained material, with edge crossfades and a bounded fallback for short or very large notes. This improves the current local preview without introducing an unreviewed DSP dependency or its license obligations; formant preservation and real-world vocal evaluation remain follow-up work.
