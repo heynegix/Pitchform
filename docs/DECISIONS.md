@@ -31,3 +31,7 @@ Audio decoding can allocate substantially more memory than the compressed file s
 ## 2026-09-15 — Keep the piano-key gutter outside the timeline
 
 The editor reserves a fixed left gutter for piano keys. Timeline coordinates begin after that gutter and use the same mapping for notes, pitch curves, waveforms, playhead, seeking, and loop selection. This prevents a visible click position from seeking to a different time than the content under the cursor.
+
+## 2026-09-15 — Check in generated desktop bundle icons
+
+Tauri's Windows resource build and future macOS/Windows bundling require platform-specific icon files. The checked-in assets are generated from the project icon with the Tauri CLI and are explicitly listed in `tauri.conf.json`, so a clean runner can build the desktop bundle without relying on a developer's local generated files.
