@@ -16,6 +16,11 @@ export interface Note {
   confidence: number;
 }
 
+export interface TimeRange {
+  startSeconds: number;
+  endSeconds: number;
+}
+
 export interface AudioSourceMetadata {
   name: string;
   size: number;
@@ -27,6 +32,8 @@ export interface EditorState {
   zoom: number;
   scrollLeft: number;
   snapToSemitone: boolean;
+  loopStartSeconds?: number | null;
+  loopEndSeconds?: number | null;
 }
 
 export interface PitchformProject {
@@ -47,4 +54,3 @@ export interface PitchformProject {
   editorState: EditorState;
   audioWavBase64: string;
 }
-

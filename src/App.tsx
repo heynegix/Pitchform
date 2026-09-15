@@ -3,7 +3,7 @@ import { EditorCanvas } from './components/EditorCanvas';
 import { audioBufferToMono, encodeWav, renderCorrectedSamples } from './lib/audio';
 import { analyzeMonophonic, segmentNotes } from './lib/analysis';
 import { base64ToBytes, createPitchformProject, isPitchformProject, MAX_PROJECT_FILE_BYTES, projectToJson, sha256Hex } from './lib/project';
-import type { AudioSourceMetadata, EditorState, Note, PitchFrame, PitchformProject } from './types';
+import type { AudioSourceMetadata, EditorState, Note, PitchFrame, PitchformProject, TimeRange } from './types';
 import './styles.css';
 
 interface LoadedSource {
@@ -234,9 +234,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
+  const [loopSelection, setLoopSelection] = useState<TimeRange | null>(null);
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
   const durationSeconds = source?.buffer.duration ?? 0;
-  const loopRange = selectedNote ? { start: selectedNote.startSeconds, end: selectedNote.endSeconds } : { start: 0, end: durationSeconds };
+  const loopRange = loopSelection
+    ? { start: loopSelection.startSeconds, end: loopSelection.endSeconds }
+    : selectedNote ? { start: selectedNote.startSeconds, end: selectedNote.endSeconds } : { start: 0, end: durationSeconds };
   const activeUrl = previewMode === 'original' ? originalUrl : correctedUrl ?? originalUrl;
 
   useEffect(() => {
@@ -343,6 +346,7 @@ export default function App() {
       history.current = [];
       future.current = [];
       setPlayheadSeconds(0);
+      setLoopSelection(null);
       setPreviewMode('corrected');
       setStatus(`${analysis.notes.length} notes detected · local only`);
     } catch (loadError) {
@@ -379,6 +383,17 @@ export default function App() {
     future.current = [];
     setPlayheadSeconds(0);
     setLoopEnabled(false);
+    const savedLoopStart = project.editorState.loopStartSeconds;
+    const savedLoopEnd = project.editorState.loopEndSeconds;
+    const restoredLoopStart = typeof savedLoopStart === 'number'
+      ? Math.max(0, Math.min(buffer.duration, savedLoopStart))
+      : null;
+    const restoredLoopEnd = typeof savedLoopEnd === 'number'
+      ? Math.max(0, Math.min(buffer.duration, savedLoopEnd))
+      : null;
+    setLoopSelection(restoredLoopStart !== null && restoredLoopEnd !== null && restoredLoopEnd > restoredLoopStart
+      ? { startSeconds: restoredLoopStart, endSeconds: restoredLoopEnd }
+      : null);
     setPreviewMode('corrected');
     setStatus(`Opened ${project.sourceAudio.name}`);
   }, []);
@@ -455,7 +470,14 @@ export default function App() {
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio || !activeUrl) return;
-    if (audio.paused) void audio.play().then(() => setIsPlaying(true)).catch(() => setError('Playback was blocked by the browser.'));
+    if (audio.paused) {
+      if (loopEnabled && loopRange.end > loopRange.start
+        && (audio.currentTime < loopRange.start || audio.currentTime >= loopRange.end)) {
+        audio.currentTime = loopRange.start;
+        setPlayheadSeconds(loopRange.start);
+      }
+      void audio.play().then(() => setIsPlaying(true)).catch(() => setError('Playback was blocked by the browser.'));
+    }
     else audio.pause();
   };
 
@@ -468,17 +490,40 @@ export default function App() {
   };
 
   const toggleLoop = () => {
-    setLoopEnabled((enabled) => {
-      const next = !enabled;
-      if (next && audioRef.current) audioRef.current.currentTime = loopRange.start;
-      return next;
-    });
+    if (loopEnabled) {
+      setLoopEnabled(false);
+      return;
+    }
+    if (loopRange.end <= loopRange.start) {
+      setError('Select a loop range first. Alt-drag across the timeline.');
+      return;
+    }
+    seekTo(loopRange.start);
+    setLoopEnabled(true);
+  };
+
+  const seekTo = (seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio || durationSeconds <= 0) return;
+    const target = Number.isFinite(seconds) ? Math.max(0, Math.min(durationSeconds, seconds)) : 0;
+    try {
+      audio.currentTime = target;
+      setPlayheadSeconds(target);
+    } catch {
+      setError('Could not seek in the current audio.');
+    }
   };
 
   const handleSaveProject = () => {
     if (!source) return;
     try {
-      const editorState: EditorState = { zoom, scrollLeft, snapToSemitone };
+      const editorState: EditorState = {
+        zoom,
+        scrollLeft,
+        snapToSemitone,
+        loopStartSeconds: loopSelection?.startSeconds ?? null,
+        loopEndSeconds: loopSelection?.endSeconds ?? null,
+      };
       const metadata: AudioSourceMetadata = { ...source.metadata };
       const project = createPitchformProject(metadata, source.buffer.sampleRate, durationSeconds, source.samples, source.frames, notes, editorState);
       downloadBlob(new Blob([projectToJson(project)], { type: 'application/json' }), `${outputBaseName(source.file.name)}.pitchform`);
@@ -583,8 +628,11 @@ export default function App() {
               zoom={zoom}
               snapToSemitone={snapToSemitone}
               playheadSeconds={playheadSeconds}
+              loopSelection={loopSelection}
               onScrollLeftChange={setScrollLeft}
-              onSelectNote={(noteId) => { setSelectedNoteId(noteId); if (noteId) { const note = notes.find((item) => item.id === noteId); if (note && audioRef.current) audioRef.current.currentTime = note.startSeconds; } }}
+              onSelectNote={(noteId) => { setSelectedNoteId(noteId); if (noteId) { const note = notes.find((item) => item.id === noteId); if (note) seekTo(note.startSeconds); } }}
+              onSeekSeconds={seekTo}
+              onLoopSelectionChange={(selection) => { setLoopSelection(selection.endSeconds > selection.startSeconds ? selection : null); }}
               onChangeNotePitch={(noteId, pitch, fine) => { beginNoteEdit(); changeNotePitch(noteId, pitch, fine); }}
               onCommitNotePitch={commitNoteEdit}
             />
@@ -598,7 +646,7 @@ export default function App() {
               </div>
               <div className="edit-options">
                 <label><input type="checkbox" checked={snapToSemitone} onChange={(event) => setSnapToSemitone(event.target.checked)} /> Snap</label>
-                <span className="hint">Shift-drag for fine pitch</span>
+                <span className="hint">Alt-drag for loop · Shift-drag for fine pitch</span>
               </div>
             </div>
           </section>

@@ -27,7 +27,8 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 3. YIN-style difference analysis produces voiced F0 frames, confidence, and MIDI pitch.
 4. Rule-based segmentation groups stable voiced frames into editable `Note` objects.
 5. The editor changes only `targetPitchMidi`; original analysis remains immutable.
-6. Preview/export uses a deterministic per-note resampling renderer in a dedicated worker. It preserves the project timeline and is deliberately replaceable by a higher-quality phase-vocoder or neural backend later.
+6. Canvas clicks seek the transport, while Alt-drag creates an explicit loop range. A loop selection is editor state, not an audio edit, and is restored when a project is reopened.
+7. Preview/export uses a deterministic per-note resampling renderer in a dedicated worker. It preserves the project timeline and is deliberately replaceable by a higher-quality phase-vocoder or neural backend later.
 
 ## Invariants
 
@@ -38,4 +39,5 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 - all audio samples written to WAV are finite and clipped to `[-1, 1]`.
 - project files are size- and shape-validated before their embedded audio is decoded;
 - embedded project audio is capped at 256 MB of project JSON and must match the stored duration; the decoded sample rate may vary because browsers can resample through `AudioContext`;
+- loop ranges are optional, finite, strictly positive, and bounded by the analyzed duration; older projects without loop fields remain valid;
 - only the newest load/render operation may update application state.

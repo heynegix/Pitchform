@@ -53,4 +53,29 @@ describe('project format', () => {
     expect(isPitchformProject({ ...project, edits: { notes: [{ ...note, startSeconds: 0.01 }] } })).toBe(false);
     expect(isPitchformProject({ ...project, audioWavBase64: 'AAAAA' })).toBe(false);
   });
+
+  it('accepts a valid loop selection and rejects malformed loop state', () => {
+    const project = createPitchformProject(
+      { name: 'vocal.wav', size: 10, lastModified: 0, sha256: 'c'.repeat(64) },
+      100,
+      0.04,
+      new Float32Array([0, 0.25, -0.25, 0]),
+      [],
+      [],
+      { zoom: 1, scrollLeft: 0, snapToSemitone: true, loopStartSeconds: 0.01, loopEndSeconds: 0.03 },
+    );
+    expect(isPitchformProject(project)).toBe(true);
+    expect(isPitchformProject({
+      ...project,
+      editorState: { ...project.editorState, loopStartSeconds: -0.01 },
+    })).toBe(false);
+    expect(isPitchformProject({
+      ...project,
+      editorState: { ...project.editorState, loopStartSeconds: null, loopEndSeconds: 0.03 },
+    })).toBe(false);
+    expect(isPitchformProject({
+      ...project,
+      editorState: { ...project.editorState, loopStartSeconds: 0.03, loopEndSeconds: 0.01 },
+    })).toBe(false);
+  });
 });

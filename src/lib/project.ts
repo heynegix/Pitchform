@@ -106,6 +106,19 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
       && typeof confidence === 'number' && Number.isFinite(confidence)
       && confidence >= 0 && confidence <= 1;
   };
+  const loopStartSeconds = editorState?.loopStartSeconds;
+  const loopEndSeconds = editorState?.loopEndSeconds;
+  const validLoopSelection = (loopStartSeconds === undefined && loopEndSeconds === undefined)
+    || (loopStartSeconds === null && loopEndSeconds === null)
+    || (typeof loopStartSeconds === 'number'
+      && Number.isFinite(loopStartSeconds)
+      && loopStartSeconds >= 0
+      && typeof loopEndSeconds === 'number'
+      && Number.isFinite(loopEndSeconds)
+      && loopEndSeconds > loopStartSeconds
+      && typeof durationSeconds === 'number'
+      && Number.isFinite(durationSeconds)
+      && loopEndSeconds <= durationSeconds);
   return project.format === 'pitchform'
     && project.formatVersion === 1
     && project.pitchformVersion === PITCHFORM_VERSION
@@ -128,7 +141,8 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
     && new Set(notes.map((note) => note.id)).size === notes.length
     && typeof editorState?.zoom === 'number' && Number.isFinite(editorState.zoom) && editorState.zoom >= 1 && editorState.zoom <= 16
     && typeof editorState?.scrollLeft === 'number' && Number.isFinite(editorState.scrollLeft) && editorState.scrollLeft >= 0
-    && typeof editorState?.snapToSemitone === 'boolean';
+    && typeof editorState?.snapToSemitone === 'boolean'
+    && validLoopSelection;
 }
 
 export function projectToJson(project: PitchformProject): string {

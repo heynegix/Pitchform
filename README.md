@@ -14,6 +14,7 @@ Pitchform is an early `0.1.0` MVP foundation. The current app already includes:
 
 - WAV/MP3/FLAC import through the desktop webview's native decoder
 - waveform and piano-roll visualization
+- canvas click-to-seek and Alt-drag loop selection
 - local monophonic F0 detection with confidence values
 - rule-based note segmentation
 - vertical note dragging with semitone snapping and fine adjustment
@@ -60,4 +61,3 @@ Audio is processed in the local app. Pitchform does not upload audio, require an
 ## License
 
 Pitchform is released under the MIT License. See [LICENSE](LICENSE).
-
