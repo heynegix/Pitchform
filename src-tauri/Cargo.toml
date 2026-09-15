@@ -1,0 +1,20 @@
+[package]
+name = "pitchform"
+version = "0.1.0"
+description = "Local-first visual vocal editor"
+authors = ["NEGI46"]
+edition = "2021"
+
+[lib]
+name = "pitchform_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
