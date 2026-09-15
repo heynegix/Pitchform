@@ -39,3 +39,7 @@ Tauri's Windows resource build and future macOS/Windows bundling require platfor
 ## 2026-09-15 — Use a dependency-free phase-vocoder preview backend
 
 The first renderer's per-note sample re-indexing changed pitch by effectively speeding up or slowing down each note and could hold the final sample at note boundaries. A small FFT phase-vocoder path now preserves note duration for sustained material, with edge crossfades and a bounded fallback for short or very large notes. This improves the current local preview without introducing an unreviewed DSP dependency or its license obligations; formant preservation and real-world vocal evaluation remain follow-up work.
+
+## 2026-09-15 — Add bounded context around each corrected note
+
+Evaluation with a real 44.1 kHz mono vocal mix showed that note-by-note processing must see the transient and phase material immediately before and after a note. The renderer now supplies up to 20 ms (capped at 4,096 samples) of source context to the phase vocoder, but mixes the result back only within the note's original sample range and retains the existing crossfade. This reduces edge-start artifacts without changing neighboring audio or making context memory unbounded. Perceptual quality still requires listening-based evaluation, especially for double-tracked or otherwise non-monophonic material.

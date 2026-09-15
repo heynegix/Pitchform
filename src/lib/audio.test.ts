@@ -66,6 +66,23 @@ describe('audio rendering', () => {
     expect(source).toEqual(original);
   });
 
+  it('does not edit samples outside the note boundary', () => {
+    const sampleRate = 44_100;
+    const source = new Float32Array(sampleRate);
+    for (let index = 0; index < source.length; index += 1) source[index] = 0.25 * Math.sin(index / 9);
+    const start = Math.floor(sampleRate * 0.2);
+    const end = Math.floor(sampleRate * 0.8);
+    const rendered = renderCorrectedSamples(source, sampleRate, [{
+      ...note,
+      startSeconds: 0.2,
+      endSeconds: 0.8,
+      originalPitchMidi: 69,
+      targetPitchMidi: 72,
+    }]);
+    expect(rendered.slice(0, start)).toEqual(source.slice(0, start));
+    expect(rendered.slice(end)).toEqual(source.slice(end));
+  });
+
   it('rejects fractional WAV sample rates', () => {
     expect(() => encodeWav(new Float32Array(1), 44_100.5)).toThrow(RangeError);
   });

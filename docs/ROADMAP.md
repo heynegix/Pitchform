@@ -10,7 +10,8 @@
 - [x] undo/redo and original/corrected A/B preview
 - [x] WAV export and `.pitchform` save/open
 - [x] higher-quality pitch-shift renderer
-- [ ] real-world vocal evaluation and artifact tuning
+- [x] real-audio pipeline evaluation and note-boundary context tuning
+- [ ] perceptual vocal evaluation and listening-based artifact tuning
 
 ## v0.2
 
