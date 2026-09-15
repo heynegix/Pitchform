@@ -23,3 +23,11 @@ Opening or dropping a second file must never allow the first file's analysis or 
 ## 2026-09-15 — Bound project input before parsing
 
 `.pitchform` is JSON with embedded base64 audio, so an untrusted file can otherwise cause excessive allocation before validation. The app rejects project files above 256 MB, validates the envelope and note/frame limits, and verifies that decoded audio matches the stored analysis duration before changing editor state. The sample rate is allowed to differ because browser `AudioContext` implementations may resample decoded audio; the current buffer's actual rate is used for rendering and future saves.
+
+## 2026-09-15 — Bound audio imports before decoding
+
+Audio decoding can allocate substantially more memory than the compressed file size. The browser path therefore rejects source audio larger than 256 MB before creating an `AudioContext`. This keeps an accidental or malicious large drop from causing an avoidable memory spike; longer or higher-quality source support can be revisited with measured streaming limits.
+
+## 2026-09-15 — Keep the piano-key gutter outside the timeline
+
+The editor reserves a fixed left gutter for piano keys. Timeline coordinates begin after that gutter and use the same mapping for notes, pitch curves, waveforms, playhead, seeking, and loop selection. This prevents a visible click position from seeking to a different time than the content under the cursor.

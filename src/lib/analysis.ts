@@ -140,7 +140,7 @@ export function analyzeMonophonic(
   options: AnalysisOptions = {},
 ): PitchFrame[] {
   const resolved = resolveOptions(options);
-  if (samples.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0 || sampleRate > 384_000) return [];
+  if (samples.length === 0 || !Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 384_000) return [];
   const cleanSamples = new Float32Array(samples.length);
   for (let index = 0; index < samples.length; index += 1) {
     cleanSamples[index] = Number.isFinite(samples[index]) ? samples[index] : 0;

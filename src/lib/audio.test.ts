@@ -49,4 +49,9 @@ describe('audio rendering', () => {
   it('rejects fractional WAV sample rates', () => {
     expect(() => encodeWav(new Float32Array(1), 44_100.5)).toThrow(RangeError);
   });
+
+  it('does not mute the source when the render rate is invalid', () => {
+    const source = new Float32Array([0.25, Number.NaN, -0.5]);
+    expect(renderCorrectedSamples(source, Number.NaN, [])).toEqual(new Float32Array([0.25, 0, -0.5]));
+  });
 });
