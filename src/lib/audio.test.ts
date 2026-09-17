@@ -17,6 +17,8 @@ describe('audio rendering', () => {
   it('rejects decoded audio that could exhaust memory', () => {
     expect(() => validateDecodedAudioBuffer({ length: 96_000_001, numberOfChannels: 2, duration: 10 })).toThrow(/decoded data/);
     expect(() => validateDecodedAudioBuffer({ length: 1, numberOfChannels: 1, duration: 3_601 })).toThrow(/60 minutes/);
+    expect(() => validateDecodedAudioBuffer({ length: -1, numberOfChannels: 1, duration: 1 })).toThrow(/decoded data/);
+    expect(() => validateDecodedAudioBuffer({ length: 1, numberOfChannels: 0, duration: 1 })).toThrow(/decoded data/);
     expect(() => validateDecodedAudioBuffer({ length: 48_000, numberOfChannels: 1, duration: 1 })).not.toThrow();
   });
 

@@ -46,6 +46,41 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
+function medianOfNeighborPitches(frames: PitchFrame[], index: number): number {
+  let first = 0;
+  let second = 0;
+  let third = 0;
+  let count = 0;
+  for (let neighbor = Math.max(0, index - 1); neighbor <= Math.min(frames.length - 1, index + 1); neighbor += 1) {
+    const candidate = frames[neighbor];
+    if (!candidate.voiced || candidate.midi === null || !Number.isFinite(candidate.midi)) continue;
+    if (count === 0) first = candidate.midi;
+    else if (count === 1) second = candidate.midi;
+    else third = candidate.midi;
+    count += 1;
+  }
+  if (count === 0) return 0;
+  if (count === 1) return first;
+  if (count === 2) return (first + second) / 2;
+  return first + second + third - Math.min(first, second, third) - Math.max(first, second, third);
+}
+
+function finiteSamples(samples: Float32Array): Float32Array {
+  let needsCopy = false;
+  for (let index = 0; index < samples.length; index += 1) {
+    if (!Number.isFinite(samples[index])) {
+      needsCopy = true;
+      break;
+    }
+  }
+  if (!needsCopy) return samples;
+  const cleanSamples = samples.slice();
+  for (let index = 0; index < cleanSamples.length; index += 1) {
+    if (!Number.isFinite(cleanSamples[index])) cleanSamples[index] = 0;
+  }
+  return cleanSamples;
+}
+
 function resolveOptions(options: AnalysisOptions): ResolvedAnalysisOptions {
   const positiveInteger = (value: number | undefined, fallback: number, minimum: number, maximum: number) => {
     if (!Number.isFinite(value)) return fallback;
@@ -100,8 +135,6 @@ function analyzeFrame(
     difference[tau] = sum / Math.max(1, limit);
   }
 
-  let signalPower = 0;
-  for (let index = 0; index < available; index += 1) signalPower += samples[start + index] ** 2;
   const normalized = new Float64Array(maxTau + 1);
   let running = 0;
   let bestTau = minTau;
@@ -129,7 +162,7 @@ function analyzeFrame(
   const period = bestTau + offset;
   const frequencyHz = sampleRate / period;
   const confidence = clamp(1 - bestValue, 0, 1) * clamp(rms / 0.08, 0.35, 1);
-  const voiced = Number.isFinite(frequencyHz) && confidence >= 0.35 && signalPower > 0;
+  const voiced = Number.isFinite(frequencyHz) && confidence >= 0.35 && energy > 0;
   return {
     frequencyHz: voiced ? frequencyHz : null,
     confidence: voiced ? confidence : 0,
@@ -144,10 +177,7 @@ export function analyzeMonophonic(
 ): PitchFrame[] {
   const resolved = resolveOptions(options);
   if (samples.length === 0 || !Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 384_000) return [];
-  const cleanSamples = new Float32Array(samples.length);
-  for (let index = 0; index < samples.length; index += 1) {
-    cleanSamples[index] = Number.isFinite(samples[index]) ? samples[index] : 0;
-  }
+  const cleanSamples = finiteSamples(samples);
   const frames: PitchFrame[] = [];
   const durationSeconds = cleanSamples.length / sampleRate;
   const progress = options.onProgress;
@@ -171,11 +201,7 @@ export function analyzeMonophonic(
   // Median smoothing removes isolated octave or autocorrelation errors without erasing note changes.
   const smoothed = frames.map((frame, index) => {
     if (!frame.voiced || frame.midi === null) return frame;
-    const neighbors = frames
-      .slice(Math.max(0, index - 1), Math.min(frames.length, index + 2))
-      .filter((candidate) => candidate.voiced && candidate.midi !== null)
-      .map((candidate) => candidate.midi as number);
-    const smoothedMidi = median(neighbors);
+    const smoothedMidi = medianOfNeighborPitches(frames, index);
     return {
       ...frame,
       midi: smoothedMidi,
