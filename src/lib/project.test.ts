@@ -125,4 +125,28 @@ describe('project format', () => {
       edits: { notes: [{ ...project.edits.notes[0], targetPitchMidi: 128, centsOffset: 5_900 }] },
     })).toBe(false);
   });
+
+  it('rejects project viewport and duration values outside the editor limits', () => {
+    const project = createPitchformProject(
+      { name: 'vocal.wav', size: 10, lastModified: 0, sha256: '1'.repeat(64) },
+      100,
+      0.04,
+      new Float32Array([0, 0.25, -0.25, 0]),
+      [],
+      [],
+      { zoom: 1, scrollLeft: 0, snapToSemitone: true },
+    );
+    expect(isPitchformProject({
+      ...project,
+      analysis: { ...project.analysis, durationSeconds: 3_601 },
+    })).toBe(false);
+    expect(isPitchformProject({
+      ...project,
+      editorState: { ...project.editorState, zoom: 16 },
+    })).toBe(false);
+    expect(isPitchformProject({
+      ...project,
+      editorState: { ...project.editorState, scrollLeft: 10_000_001 },
+    })).toBe(false);
+  });
 });

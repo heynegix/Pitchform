@@ -1,4 +1,4 @@
-import { encodeWav } from './audio';
+import { encodeWav, MAX_AUDIO_DURATION_SECONDS } from './audio';
 import type { AudioSourceMetadata, EditorState, Note, PitchFrame, PitchformProject } from '../types';
 
 export const PITCHFORM_VERSION = '0.1.0';
@@ -6,6 +6,8 @@ export const MAX_PROJECT_FILE_BYTES = 256_000_000;
 const MAX_AUDIO_BASE64_LENGTH = MAX_PROJECT_FILE_BYTES;
 export const MAX_PROJECT_FRAMES = 3_000_000;
 export const MAX_PROJECT_NOTES = 50_000;
+export const MAX_EDITOR_ZOOM = 4;
+export const MAX_EDITOR_SCROLL_LEFT = 10_000_000;
 const MIN_MIDI = 0;
 const MAX_MIDI = 127;
 
@@ -140,7 +142,7 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
     && Number.isSafeInteger(source.size) && source.size >= 0
     && Number.isSafeInteger(source.lastModified) && source.lastModified >= 0 && typeof source.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(source.sha256)
     && typeof analysis?.sampleRate === 'number' && Number.isInteger(analysis.sampleRate) && analysis.sampleRate >= 1 && analysis.sampleRate <= 384_000
-    && typeof analysis?.durationSeconds === 'number' && Number.isFinite(analysis.durationSeconds) && analysis.durationSeconds > 0 && analysis.durationSeconds <= 86_400
+    && typeof analysis?.durationSeconds === 'number' && Number.isFinite(analysis.durationSeconds) && analysis.durationSeconds > 0 && analysis.durationSeconds <= MAX_AUDIO_DURATION_SECONDS
     && Array.isArray(analysis?.frames) && analysis.frames.length <= MAX_PROJECT_FRAMES && analysis.frames.every(validFrame)
     && orderedFrames
     && safeNoteCollection(project.notes) && project.notes.length <= MAX_PROJECT_NOTES
@@ -148,8 +150,8 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
     && safeNoteCollection(notes) && notes.length === project.notes.length && notes.length <= MAX_PROJECT_NOTES
     && project.notes.every((note, index) => sameNoteStructure(note, notes[index]))
     && new Set(notes.map((note) => note.id)).size === notes.length
-    && typeof editorState?.zoom === 'number' && Number.isFinite(editorState.zoom) && editorState.zoom >= 1 && editorState.zoom <= 16
-    && typeof editorState?.scrollLeft === 'number' && Number.isFinite(editorState.scrollLeft) && editorState.scrollLeft >= 0
+    && typeof editorState?.zoom === 'number' && Number.isFinite(editorState.zoom) && editorState.zoom >= 1 && editorState.zoom <= MAX_EDITOR_ZOOM
+    && typeof editorState?.scrollLeft === 'number' && Number.isFinite(editorState.scrollLeft) && editorState.scrollLeft >= 0 && editorState.scrollLeft <= MAX_EDITOR_SCROLL_LEFT
     && typeof editorState?.snapToSemitone === 'boolean'
     && validLoopSelection;
 }

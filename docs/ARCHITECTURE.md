@@ -42,7 +42,7 @@ The analysis and rendering modules do not import React or Tauri. This keeps the 
 - loop ranges are optional, finite, strictly positive, and bounded by the analyzed duration; older projects without loop fields remain valid;
 - imported audio files are capped at 256 MB before decoding, and a new document resets transport/editor viewport state rather than inheriting the previous document's position;
 - decoded audio is capped at 3,600 seconds and 192 million channel samples after decoding, protecting both direct imports and embedded project audio from compressed/decompressed size mismatches;
-- project validation is additionally capped at 3,000,000 ordered pitch frames and 50,000 ordered, non-overlapping notes; note MIDI and cents metadata must agree;
+- project validation is additionally capped at 3,000,000 ordered pitch frames and 50,000 ordered, non-overlapping notes; note MIDI and cents metadata must agree, and saved duration/viewport values stay within the editor limits;
 - timeline coordinates exclude the fixed piano-key gutter, so drawing, seeking, waveform peaks, notes, and loop ranges share one time origin;
 - undo/redo stacks are mutated outside React state updater callbacks, capped at 100 snapshots, and a small render signal keeps toolbar availability synchronized without Strict Mode side effects;
 - CI runs frontend checks plus Rust/Tauri checks on Ubuntu, Windows, and macOS, with dependency auditing and bounded job duration;
