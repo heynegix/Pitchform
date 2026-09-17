@@ -4,8 +4,10 @@ import type { AudioSourceMetadata, EditorState, Note, PitchFrame, PitchformProje
 export const PITCHFORM_VERSION = '0.1.0';
 export const MAX_PROJECT_FILE_BYTES = 256_000_000;
 const MAX_AUDIO_BASE64_LENGTH = MAX_PROJECT_FILE_BYTES;
-const MAX_FRAMES = 5_000_000;
-const MAX_NOTES = 250_000;
+export const MAX_PROJECT_FRAMES = 3_000_000;
+export const MAX_PROJECT_NOTES = 50_000;
+const MIN_MIDI = 0;
+const MAX_MIDI = 127;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -100,12 +102,18 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
       && Number.isFinite(startSeconds) && Number.isFinite(endSeconds)
       && startSeconds >= 0 && endSeconds > startSeconds
       && typeof durationSeconds === 'number' && Number.isFinite(durationSeconds) && endSeconds <= durationSeconds
-      && Number.isFinite(item.originalPitchMidi) && (item.originalPitchMidi as number) >= -128 && (item.originalPitchMidi as number) <= 256
-      && Number.isFinite(item.targetPitchMidi) && (item.targetPitchMidi as number) >= -128 && (item.targetPitchMidi as number) <= 256
-      && Number.isFinite(item.centsOffset) && (item.centsOffset as number) >= -38_400 && (item.centsOffset as number) <= 38_400
+      && Number.isFinite(item.originalPitchMidi) && (item.originalPitchMidi as number) >= MIN_MIDI && (item.originalPitchMidi as number) <= MAX_MIDI
+      && Number.isFinite(item.targetPitchMidi) && (item.targetPitchMidi as number) >= MIN_MIDI && (item.targetPitchMidi as number) <= MAX_MIDI
+      && Number.isFinite(item.centsOffset) && (item.centsOffset as number) >= -12_700 && (item.centsOffset as number) <= 12_700
+      && Math.abs((item.centsOffset as number) - ((item.targetPitchMidi as number) - (item.originalPitchMidi as number)) * 100) <= 0.01
       && typeof confidence === 'number' && Number.isFinite(confidence)
       && confidence >= 0 && confidence <= 1;
   };
+  const orderedFrames = Array.isArray(analysis?.frames)
+    && analysis.frames.every((frame, index) => index === 0 || frame.timeSeconds >= analysis.frames[index - 1].timeSeconds);
+  const safeNoteCollection = (items: unknown): items is Note[] => Array.isArray(items)
+    && items.every(validNote)
+    && items.every((note, index) => index === 0 || note.startSeconds >= items[index - 1].endSeconds);
   const loopStartSeconds = editorState?.loopStartSeconds;
   const loopEndSeconds = editorState?.loopEndSeconds;
   const validLoopSelection = (loopStartSeconds === undefined && loopEndSeconds === undefined)
@@ -133,10 +141,11 @@ export function isPitchformProject(value: unknown): value is PitchformProject {
     && Number.isSafeInteger(source.lastModified) && source.lastModified >= 0 && typeof source.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(source.sha256)
     && typeof analysis?.sampleRate === 'number' && Number.isInteger(analysis.sampleRate) && analysis.sampleRate >= 1 && analysis.sampleRate <= 384_000
     && typeof analysis?.durationSeconds === 'number' && Number.isFinite(analysis.durationSeconds) && analysis.durationSeconds > 0 && analysis.durationSeconds <= 86_400
-    && Array.isArray(analysis?.frames) && analysis.frames.length <= MAX_FRAMES && analysis.frames.every(validFrame)
-    && Array.isArray(project.notes) && project.notes.length <= MAX_NOTES && project.notes.every(validNote)
+    && Array.isArray(analysis?.frames) && analysis.frames.length <= MAX_PROJECT_FRAMES && analysis.frames.every(validFrame)
+    && orderedFrames
+    && safeNoteCollection(project.notes) && project.notes.length <= MAX_PROJECT_NOTES
     && new Set(project.notes.map((note) => note.id)).size === project.notes.length
-    && Array.isArray(notes) && notes.length === project.notes.length && notes.every(validNote)
+    && safeNoteCollection(notes) && notes.length === project.notes.length && notes.length <= MAX_PROJECT_NOTES
     && project.notes.every((note, index) => sameNoteStructure(note, notes[index]))
     && new Set(notes.map((note) => note.id)).size === notes.length
     && typeof editorState?.zoom === 'number' && Number.isFinite(editorState.zoom) && editorState.zoom >= 1 && editorState.zoom <= 16

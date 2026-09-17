@@ -296,6 +296,7 @@ export function EditorCanvas({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
+    event.currentTarget.focus();
     if (event.altKey) {
       if (!isTimelineClientX(event.clientX)) return;
       event.preventDefault();
@@ -375,6 +376,7 @@ export function EditorCanvas({
     <div className="editor-scroll" ref={scrollerRef} onScroll={(event) => onScrollLeftChange(event.currentTarget.scrollLeft)}>
       <canvas
         aria-keyshortcuts="ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown R Space Control+Z Control+Shift+Z Control+S"
+        aria-describedby="editor-keyboard-help"
         aria-label="Pitchform piano roll editor. Select a note, use arrow keys to change pitch, and press R to reset."
         className="editor-canvas"
         ref={canvasRef}
@@ -384,6 +386,7 @@ export function EditorCanvas({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
       />
+      <span id="editor-keyboard-help" className="sr-only">Use left and right arrows to select notes, up and down arrows to change pitch, Shift for quarter-tone edits, R to reset, and Space to play or pause.</span>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { EditorCanvas } from './components/EditorCanvas';
 import { audioBufferToMono, encodeWav, renderCorrectedSamples, validateDecodedAudioBuffer } from './lib/audio';
 import { analyzeMonophonic, segmentNotes } from './lib/analysis';
 import { isNotePitchEdited, nudgeNotePitch, noteStateSignature, resetNotePitch, updateNotePitch } from './lib/editor';
+import { outputBaseName } from './lib/filename';
 import { base64ToBytes, createPitchformProject, isPitchformProject, MAX_PROJECT_FILE_BYTES, projectToJson, sha256Hex } from './lib/project';
 import type { AudioSourceMetadata, EditorState, Note, PitchFrame, PitchformProject, TimeRange } from './types';
 import './styles.css';
@@ -16,9 +17,15 @@ interface LoadedSource {
 }
 
 const MAX_AUDIO_FILE_BYTES = 256_000_000;
+const MAX_HISTORY_ENTRIES = 100;
 
 function cloneNotes(notes: Note[]): Note[] {
   return notes.map((note) => ({ ...note }));
+}
+
+function pushHistorySnapshot(history: Note[][], snapshot: Note[]): void {
+  history.push(snapshot);
+  if (history.length > MAX_HISTORY_ENTRIES) history.splice(0, history.length - MAX_HISTORY_ENTRIES);
 }
 
 function notesEqual(left: Note[], right: Note[]): boolean {
@@ -57,15 +64,6 @@ function formatTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.floor(seconds % 60).toString().padStart(2, '0');
   return `${minutes}:${remainder}`;
-}
-
-function outputBaseName(name: string): string {
-  const withoutExtension = name.replace(/\.[^/.]+$/, '');
-  const safe = Array.from(withoutExtension, (character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || '\\/:*?"<>|'.includes(character) ? '_' : character;
-  }).join('');
-  return safe.trim() || 'pitchform';
 }
 
 async function decodeAudioFile(file: File): Promise<{ buffer: AudioBuffer; raw: ArrayBuffer }> {
@@ -530,7 +528,7 @@ export default function App() {
     dragStartNotes.current = null;
     if (!before) return;
     if (notesEqual(before, latestNotes.current)) return;
-    history.current.push(before);
+    pushHistorySnapshot(history.current, before);
     future.current = [];
     updateDirtyState(latestNotes.current);
     forceHistoryRender((value) => value + 1);
@@ -540,7 +538,7 @@ export default function App() {
   const undo = () => {
     const previous = history.current.pop();
     if (!previous) return;
-    future.current.push(cloneNotes(latestNotes.current));
+    pushHistorySnapshot(future.current, cloneNotes(latestNotes.current));
     const nextNotes = cloneNotes(previous);
     latestNotes.current = nextNotes;
     setNotes(nextNotes);
@@ -552,7 +550,7 @@ export default function App() {
   const redo = () => {
     const next = future.current.pop();
     if (!next) return;
-    history.current.push(cloneNotes(latestNotes.current));
+    pushHistorySnapshot(history.current, cloneNotes(latestNotes.current));
     const nextNotes = cloneNotes(next);
     latestNotes.current = nextNotes;
     setNotes(nextNotes);
@@ -568,7 +566,7 @@ export default function App() {
     if (!selected) return;
     const updated = nudgeNotePitch(selected, direction, fine);
     if (updated.targetPitchMidi === selected.targetPitchMidi) return;
-    history.current.push(cloneNotes(before));
+    pushHistorySnapshot(history.current, cloneNotes(before));
     future.current = [];
     const nextNotes = before.map((note) => note.id === selectedNoteId ? updated : note);
     latestNotes.current = nextNotes;
@@ -584,13 +582,30 @@ export default function App() {
     const selected = before.find((note) => note.id === selectedNoteId);
     if (!selected || !isNotePitchEdited(selected)) return;
     const nextNotes = before.map((note) => note.id === selectedNoteId ? resetNotePitch(note) : note);
-    history.current.push(cloneNotes(before));
+    pushHistorySnapshot(history.current, cloneNotes(before));
     future.current = [];
     latestNotes.current = nextNotes;
     setNotes(nextNotes);
     updateDirtyState(nextNotes);
     forceHistoryRender((value) => value + 1);
     setStatus('Selected note reset');
+  };
+
+  const setSelectedNotePitch = (pitch: number) => {
+    if (!selectedNoteId || !Number.isFinite(pitch)) return;
+    const before = latestNotes.current;
+    const selected = before.find((note) => note.id === selectedNoteId);
+    if (!selected) return;
+    const updated = updateNotePitch(selected, pitch, true);
+    if (updated.targetPitchMidi === selected.targetPitchMidi) return;
+    pushHistorySnapshot(history.current, cloneNotes(before));
+    future.current = [];
+    const nextNotes = before.map((note) => note.id === selectedNoteId ? updated : note);
+    latestNotes.current = nextNotes;
+    setNotes(nextNotes);
+    updateDirtyState(nextNotes);
+    forceHistoryRender((value) => value + 1);
+    setStatus('Note pitch updated');
   };
 
   const togglePlay = () => {
@@ -783,10 +798,14 @@ export default function App() {
                 <span className="time-readout">{formatTime(playheadSeconds)} / {formatTime(durationSeconds)}</span>
               </div>
               <div className="toolbar-group center-tools">
-                <button className={previewMode === 'original' ? 'toggle-button active' : 'toggle-button'} onClick={() => setPreviewMode('original')}>Original</button>
-                <button className={previewMode === 'corrected' ? 'toggle-button active' : 'toggle-button'} onClick={() => setPreviewMode('corrected')}>Corrected</button>
-                <button className={loopEnabled ? 'toggle-button active' : 'toggle-button'} onClick={toggleLoop}>Loop</button>
+                <button className={previewMode === 'original' ? 'toggle-button active' : 'toggle-button'} aria-pressed={previewMode === 'original'} onClick={() => setPreviewMode('original')}>Original</button>
+                <button className={previewMode === 'corrected' ? 'toggle-button active' : 'toggle-button'} aria-pressed={previewMode === 'corrected'} onClick={() => setPreviewMode('corrected')}>Corrected</button>
+                <button className={loopEnabled ? 'toggle-button active' : 'toggle-button'} aria-pressed={loopEnabled} onClick={toggleLoop}>Loop</button>
               </div>
+              <label className="scrub-control">
+                <span className="sr-only">Playhead position</span>
+                <input aria-label="Playhead position" type="range" min="0" max={Math.max(0.001, durationSeconds)} step="0.001" value={Math.min(durationSeconds, playheadSeconds)} onChange={(event) => seekTo(Number(event.target.value))} />
+              </label>
               <div className="toolbar-group">
                 <button className="icon-button" onClick={undo} disabled={history.current.length === 0} aria-label="Undo">↶</button>
                 <button className="icon-button" onClick={redo} disabled={future.current.length === 0} aria-label="Redo">↷</button>
@@ -817,7 +836,7 @@ export default function App() {
                 <div><strong>{source.file.name}</strong><span>{durationSeconds.toFixed(1)} sec · {source.buffer.sampleRate.toLocaleString()} Hz · {notes.length} notes</span></div>
               </div>
               <div className="edit-summary">
-                {selectedNote ? <><span className="eyebrow">SELECTED NOTE</span><strong>{selectedNote.targetPitchMidi.toFixed(2)} MIDI</strong><span className={selectedNote.targetPitchMidi === Math.round(selectedNote.originalPitchMidi) ? 'neutral' : 'accent'}>{selectedNote.targetPitchMidi - selectedNote.originalPitchMidi >= 0 ? '+' : ''}{(selectedNote.targetPitchMidi - selectedNote.originalPitchMidi).toFixed(2)} semitones</span><button className="reset-button" onClick={resetSelectedNote} disabled={!isNotePitchEdited(selectedNote) || isBusy || isRendering}>Reset</button></> : <span>Select a note to edit</span>}
+                {selectedNote ? <><span className="eyebrow">SELECTED NOTE</span><strong>{selectedNote.targetPitchMidi.toFixed(2)} MIDI</strong><span className={selectedNote.targetPitchMidi === Math.round(selectedNote.originalPitchMidi) ? 'neutral' : 'accent'}>{selectedNote.targetPitchMidi - selectedNote.originalPitchMidi >= 0 ? '+' : ''}{(selectedNote.targetPitchMidi - selectedNote.originalPitchMidi).toFixed(2)} semitones</span><label className="pitch-control"><span>Pitch</span><input aria-label="Selected note pitch in MIDI" type="number" min="0" max="127" step="0.25" value={selectedNote.targetPitchMidi} disabled={isBusy || isRendering} onChange={(event) => { if (event.target.value !== '') setSelectedNotePitch(Number(event.target.value)); }} /></label><button className="reset-button" onClick={resetSelectedNote} disabled={!isNotePitchEdited(selectedNote) || isBusy || isRendering}>Reset</button></> : <span>Select a note to edit</span>}
               </div>
               <div className="edit-options">
                 <label><input type="checkbox" checked={snapToSemitone} onChange={(event) => { const nextSnapToSemitone = event.target.checked; setSnapToSemitone(nextSnapToSemitone); updateDirtyState(latestNotes.current, zoom, nextSnapToSemitone, loopSelection); }} /> Snap</label>

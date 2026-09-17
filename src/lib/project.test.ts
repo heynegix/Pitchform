@@ -78,4 +78,51 @@ describe('project format', () => {
       editorState: { ...project.editorState, loopStartSeconds: 0.03, loopEndSeconds: 0.01 },
     })).toBe(false);
   });
+
+  it('rejects non-monotonic analysis frames and overlapping notes', () => {
+    const project = createPitchformProject(
+      { name: 'vocal.wav', size: 10, lastModified: 0, sha256: 'd'.repeat(64) },
+      100,
+      0.1,
+      new Float32Array(10),
+      [
+        { timeSeconds: 0.06, frequencyHz: 440, midi: 69, confidence: 0.9, voiced: true },
+        { timeSeconds: 0.04, frequencyHz: 440, midi: 69, confidence: 0.9, voiced: true },
+      ],
+      [],
+      { zoom: 1, scrollLeft: 0, snapToSemitone: true },
+    );
+    expect(isPitchformProject(project)).toBe(false);
+
+    const overlapping = createPitchformProject(
+      { name: 'vocal.wav', size: 10, lastModified: 0, sha256: 'e'.repeat(64) },
+      100,
+      0.1,
+      new Float32Array(10),
+      [],
+      [
+        { id: 'note-1', startSeconds: 0, endSeconds: 0.06, originalPitchMidi: 69, targetPitchMidi: 69, centsOffset: 0, confidence: 1 },
+        { id: 'note-2', startSeconds: 0.05, endSeconds: 0.1, originalPitchMidi: 70, targetPitchMidi: 70, centsOffset: 0, confidence: 1 },
+      ],
+      { zoom: 1, scrollLeft: 0, snapToSemitone: true },
+    );
+    expect(isPitchformProject(overlapping)).toBe(false);
+  });
+
+  it('rejects stale pitch metadata and pitches outside the MIDI range', () => {
+    const project = createPitchformProject(
+      { name: 'vocal.wav', size: 10, lastModified: 0, sha256: 'f'.repeat(64) },
+      100,
+      0.04,
+      new Float32Array([0, 0.25, -0.25, 0]),
+      [],
+      [{ id: 'note-1', startSeconds: 0, endSeconds: 0.02, originalPitchMidi: 69, targetPitchMidi: 70, centsOffset: 0, confidence: 1 }],
+      { zoom: 1, scrollLeft: 0, snapToSemitone: true },
+    );
+    expect(isPitchformProject(project)).toBe(false);
+    expect(isPitchformProject({
+      ...project,
+      edits: { notes: [{ ...project.edits.notes[0], targetPitchMidi: 128, centsOffset: 5_900 }] },
+    })).toBe(false);
+  });
 });

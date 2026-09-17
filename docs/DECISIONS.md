@@ -51,3 +51,26 @@ The first renderer's per-note sample re-indexing changed pitch by effectively sp
 ## 2026-09-15 — Add bounded context around each corrected note
 
 Evaluation with a real 44.1 kHz mono vocal mix showed that note-by-note processing must see the transient and phase material immediately before and after a note. The renderer now supplies up to 20 ms (capped at 4,096 samples) of source context to the phase vocoder, but mixes the result back only within the note's original sample range and retains the existing crossfade. This reduces edge-start artifacts without changing neighboring audio or making context memory unbounded. Perceptual quality still requires listening-based evaluation, especially for double-tracked or otherwise non-monophonic material.
+
+## 2026-09-17 — Bound editor history and project collections
+
+Undo snapshots copy the complete note array, so an unbounded history could turn a long edit
+session into a second audio-sized memory consumer. History is capped at 100 snapshots, and
+`.pitchform` validation accepts at most 50,000 notes and 3,000,000 analysis frames. These
+limits cover the intended 60-minute local workflow while rejecting pathological documents
+before they reach Canvas, rendering, or React state.
+
+## 2026-09-17 — Provide non-Canvas precision controls
+
+Canvas remains the primary visual editor, but it is not a sufficient accessibility or precision
+surface on its own. A native playhead slider and numeric MIDI pitch field expose the same seek
+and quarter-tone edit operations to keyboard users and users who need exact values. Reduced
+motion styling and explicit focus guidance complete the fallback without adding a second editor
+model.
+
+## 2026-09-17 — Avoid unnecessary analysis copies
+
+The analysis core must accept arbitrary `Float32Array` input without mutating it, but normal
+decoded audio is already finite and sanitized by the mono downmix. The analyzer therefore scans
+for non-finite values and only creates a cleaned copy when needed. Duplicate per-frame energy
+work and temporary neighbor arrays are also avoided to keep long local analyses more predictable.

@@ -46,6 +46,7 @@ Audio imports are limited to 256 MB compressed input, 60 minutes of decoded dura
 - `Space` plays or pauses; `←`/`→` selects neighboring notes.
 - `↑`/`↓` nudges the selected note by a semitone; `Shift` nudges by a quarter tone.
 - `R` resets the selected note to its detected pitch.
+- The selected note's MIDI pitch can also be entered directly in the bottom panel.
 - `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+S` undo, redo, and save.
 
 Pitch edits and saved editor settings are marked as unsaved. Opening another audio file or project asks before discarding unsaved changes.
@@ -112,6 +113,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for boundaries and invariants.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Dependency and license audit](docs/DEPENDENCIES.md)
 - [Architecture decisions](docs/DECISIONS.md)
+- [Quality review](docs/QUALITY_REVIEW.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security and privacy](SECURITY.md)

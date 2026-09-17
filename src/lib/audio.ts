@@ -4,7 +4,9 @@ export const MAX_DECODED_CHANNEL_SAMPLES = 192_000_000;
 export const MAX_AUDIO_DURATION_SECONDS = 3_600;
 
 export function validateDecodedAudioBuffer(buffer: Pick<AudioBuffer, 'length' | 'numberOfChannels' | 'duration'>): void {
-  const decodedChannelSamples = buffer.length * Math.max(1, buffer.numberOfChannels);
+  const validLength = Number.isSafeInteger(buffer.length) && buffer.length > 0;
+  const validChannels = Number.isSafeInteger(buffer.numberOfChannels) && buffer.numberOfChannels > 0;
+  const decodedChannelSamples = validLength && validChannels ? buffer.length * buffer.numberOfChannels : Number.NaN;
   if (!Number.isSafeInteger(decodedChannelSamples)
     || decodedChannelSamples > MAX_DECODED_CHANNEL_SAMPLES
     || !Number.isFinite(buffer.duration)
